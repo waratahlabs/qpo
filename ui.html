@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QPO — Quantum Prompt Optimiser</title>
+<style>
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "SF Mono", "Fira Code", "Consolas", monospace;
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #475569;
+  --color-text-tertiary: #94a3b8;
+  --color-text-info: #185FA5;
+  --color-text-success: #166534;
+  --color-background-primary: #ffffff;
+  --color-background-secondary: #f8fafc;
+  --color-background-info: #eff6ff;
+  --color-background-success: #f0fdf4;
+  --color-border-secondary: #e2e8f0;
+  --color-border-tertiary: #f1f5f9;
+  --border-radius-md: 6px;
+  --border-radius-lg: 10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:var(--font-sans);font-size:14px;color:var(--color-text-primary);line-height:1.5;background:#f1f5f9}
+.wrapper{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+.app{display:grid;grid-template-columns:220px 1fr;min-height:600px;max-width:900px;width:100%;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;background:var(--color-background-primary);box-shadow:0 4px 24px rgba(0,0,0,.06)}
+.sidebar{background:var(--color-background-secondary);border-right:0.5px solid var(--color-border-tertiary);padding:16px 0;display:flex;flex-direction:column;gap:2px}
+.sidebar-label{font-size:11px;font-weight:500;color:var(--color-text-tertiary);padding:8px 16px 4px;letter-spacing:.06em;text-transform:uppercase}
+.nav-item{display:flex;align-items:center;gap:10px;padding:8px 16px;cursor:pointer;border-radius:0;color:var(--color-text-secondary);font-size:13px;border:none;background:none;width:100%;text-align:left}
+.nav-item:hover{background:var(--color-background-primary);color:var(--color-text-primary)}
+.nav-item.active{background:var(--color-background-primary);color:var(--color-text-primary);font-weight:500;border-left:2px solid #185FA5;padding-left:14px}
+.nav-icon{width:14px;height:14px;flex-shrink:0;color:inherit}
+.main{display:flex;flex-direction:column;overflow:hidden}
+.topbar{padding:14px 20px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;justify-content:space-between}
+.topbar-title{font-size:15px;font-weight:500}
+.phase-badge{font-size:11px;padding:3px 8px;border-radius:var(--border-radius-md);background:var(--color-background-info);color:var(--color-text-info)}
+.content{padding:20px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:16px}
+.section-label{font-size:12px;font-weight:500;color:var(--color-text-tertiary);letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+textarea.goal{width:100%;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);padding:10px 12px;font-family:var(--font-sans);font-size:13px;color:var(--color-text-primary);background:var(--color-background-primary);resize:none;height:72px;line-height:1.5}
+textarea.goal:focus{outline:none;border-color:#185FA5}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.field{display:flex;flex-direction:column;gap:5px}
+select,input[type=text]{height:34px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);padding:0 10px;font-family:var(--font-sans);font-size:13px;color:var(--color-text-primary);background:var(--color-background-primary);width:100%}
+select:focus,input:focus{outline:none;border-color:#185FA5}
+.toggle-row{display:flex;gap:6px;flex-wrap:wrap}
+.toggle-btn{font-size:12px;padding:5px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);cursor:pointer;background:var(--color-background-primary);color:var(--color-text-secondary)}
+.toggle-btn.active{background:var(--color-background-info);color:var(--color-text-info);border-color:#185FA5}
+.run-btn{display:flex;align-items:center;justify-content:center;gap:8px;height:38px;background:#185FA5;color:#fff;border:none;border-radius:var(--border-radius-md);font-size:13px;font-weight:500;cursor:pointer;width:100%}
+.run-btn:hover{background:#0C447C}
+.run-btn:disabled{background:#94a3b8;cursor:not-allowed}
+.divider{height:0.5px;background:var(--color-border-tertiary)}
+.stages{display:flex;gap:0}
+.stage{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative}
+.stage:not(:last-child)::after{content:'';position:absolute;top:12px;left:calc(50% + 12px);right:calc(-50% + 12px);height:1px;background:var(--color-border-secondary)}
+.stage-dot{width:24px;height:24px;border-radius:50%;border:2px solid var(--color-border-secondary);background:var(--color-background-secondary);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;color:var(--color-text-tertiary);z-index:1}
+.stage-dot.done{background:#185FA5;border-color:#185FA5;color:#fff}
+.stage-dot.active{background:var(--color-background-info);border-color:#185FA5;color:var(--color-text-info)}
+.stage-name{font-size:10px;color:var(--color-text-tertiary);text-align:center;max-width:60px}
+.stage-name.active{color:var(--color-text-info);font-weight:500}
+.metrics-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.metric-card{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px 12px}
+.metric-val{font-size:20px;font-weight:500;color:var(--color-text-primary)}
+.metric-lbl{font-size:11px;color:var(--color-text-tertiary);margin-top:2px}
+.log{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px 12px;font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary);display:flex;flex-direction:column;gap:3px;max-height:220px;overflow-y:auto}
+.log-line{display:flex;gap:8px}
+.log-time{color:var(--color-text-tertiary);flex-shrink:0}
+.log-ok{color:var(--color-text-success)}
+.log-info{color:var(--color-text-info)}
+.log-error{color:#dc2626}
+.results-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.result-card{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.result-card.winner{border:1px solid #185FA5;background:var(--color-background-info)}
+.result-score{font-size:22px;font-weight:500}
+.result-label{font-size:11px;color:var(--color-text-secondary)}
+.axes-table{width:100%;font-size:12px;border-collapse:collapse}
+.axes-table td{padding:4px 8px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.axes-table td:last-child{text-align:right;font-weight:500}
+.pill{display:inline-block;font-size:11px;padding:2px 7px;border-radius:99px;background:var(--color-background-success);color:var(--color-text-success)}
+.pill.off{background:var(--color-background-secondary);color:var(--color-text-tertiary)}
+.hist-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary);font-size:12px}
+.hist-score{font-size:13px;font-weight:500;min-width:36px}
+.hist-meta{color:var(--color-text-secondary);flex:1}
+.hist-badge{font-size:10px;padding:2px 7px;border-radius:99px;background:var(--color-background-secondary);color:var(--color-text-tertiary);flex-shrink:0}
+.status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#94a3b8;margin-right:4px}
+.status-dot.online{background:#22c55e}
+.status-dot.offline{background:#ef4444}
+.empty-state{color:var(--color-text-tertiary);font-size:13px;padding:20px 0;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrapper">
+<div class="app" id="app">
+  <div class="sidebar">
+    <div class="sidebar-label">Test harness</div>
+    <button class="nav-item active" data-view="run" onclick="switchView('run')">
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="4,2 14,8 4,14"/></svg>
+      New run
+    </button>
+    <button class="nav-item" data-view="progress" onclick="switchView('progress')">
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2"/></svg>
+      Progress
+    </button>
+    <button class="nav-item" data-view="results" onclick="switchView('results')">
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 12h3M2 8h6M2 4h10"/></svg>
+      Results
+    </button>
+    <button class="nav-item" data-view="history" onclick="switchView('history')">
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 6h6M5 9h4"/></svg>
+      History
+    </button>
+    <button class="nav-item" data-view="batch" onclick="switchView('batch')">
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h12M2 8h12M2 12h8"/><circle cx="13" cy="12" r="2"/></svg>
+      Batch
+    </button>
+    <div style="flex:1"></div>
+    <div style="padding:12px 16px;border-top:0.5px solid var(--color-border-tertiary)">
+      <div style="font-size:11px;color:var(--color-text-tertiary);margin-bottom:6px">Backends</div>
+      <div style="font-size:11px;display:flex;flex-direction:column;gap:4px" id="status-panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+          <span style="color:var(--color-text-secondary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="label-prescorer">Pre-scorer</span>
+          <span id="status-prescorer" style="flex-shrink:0"><span class="status-dot"></span>checking</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+          <span style="color:var(--color-text-secondary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="label-deepeval">Deep eval</span>
+          <span id="status-deepeval" style="flex-shrink:0"><span class="status-dot"></span>checking</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="color:var(--color-text-secondary)" id="label-quantum">Quantum</span>
+          <span id="status-quantum"><span class="status-dot online"></span>ready</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <span class="topbar-title" id="view-title">New run</span>
+      <span class="phase-badge" id="phase-badge">Phase 1 — pipeline validation</span>
+    </div>
+
+    <!-- RUN VIEW -->
+    <div class="content" id="view-run">
+      <div>
+        <div class="section-label">Prompt goal</div>
+        <textarea class="goal" id="input-goal" placeholder="Describe what you want the prompt to achieve...">Extract structured appointment data from unstructured patient messages and return valid JSON with date, time, patient name, and reason fields.</textarea>
+      </div>
+      <div class="row">
+        <div class="field">
+          <div class="section-label">Max feature axes</div>
+          <select id="input-axes">
+            <option value="8">8 axes (256 candidates)</option>
+            <option value="9" selected>9 axes (512 candidates)</option>
+          </select>
+        </div>
+        <div class="field">
+          <div class="section-label">QAOA pre-filter</div>
+          <select id="input-prefilter">
+            <option value="10">Top 10 (10 qubits)</option>
+            <option value="20" selected>Top 20 (20 qubits)</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <div class="section-label">Quantum backend</div>
+        <div class="toggle-row" id="backend-toggle">
+          <button class="toggle-btn active" data-value="stub">Stub (random)</button>
+          <button class="toggle-btn" data-value="lightning">Lightning CPU/GPU sim</button>
+        </div>
+      </div>
+      <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px 12px;display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:11px;color:var(--color-text-tertiary);font-weight:500;letter-spacing:.05em;text-transform:uppercase">Active models</div>
+        <div style="display:flex;justify-content:space-between;font-size:12px">
+          <span style="color:var(--color-text-tertiary)">Pre-scorer</span>
+          <span style="font-family:var(--font-mono);color:var(--color-text-secondary)" id="info-prescorer-model">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px">
+          <span style="color:var(--color-text-tertiary)">Deep eval</span>
+          <span style="font-family:var(--font-mono);color:var(--color-text-secondary)" id="info-deepeval-model">—</span>
+        </div>
+      </div>
+      <div class="divider"></div>
+      <button class="run-btn" id="run-btn" onclick="runOptimisation()">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="3,1 13,7 3,13"/></svg>
+        Run optimisation
+      </button>
+    </div>
+
+    <!-- PROGRESS VIEW -->
+    <div class="content" id="view-progress" style="display:none">
+      <div>
+        <div class="section-label">Pipeline stage</div>
+        <div class="stages" id="stages">
+          <div class="stage" id="stage-1"><div class="stage-dot" id="dot-1">1</div><div class="stage-name" id="name-1">Decompose</div></div>
+          <div class="stage" id="stage-2"><div class="stage-dot" id="dot-2">2</div><div class="stage-name" id="name-2">Generate</div></div>
+          <div class="stage" id="stage-3"><div class="stage-dot" id="dot-3">3</div><div class="stage-name" id="name-3">Pre-score</div></div>
+          <div class="stage" id="stage-4"><div class="stage-dot" id="dot-4">4</div><div class="stage-name" id="name-4">QAOA</div></div>
+          <div class="stage" id="stage-5"><div class="stage-dot" id="dot-5">5</div><div class="stage-name" id="name-5">Deep eval</div></div>
+        </div>
+      </div>
+      <div class="metrics-row">
+        <div class="metric-card"><div class="metric-val" id="m-iteration">—</div><div class="metric-lbl">QAOA iteration</div></div>
+        <div class="metric-card"><div class="metric-val" id="m-cost">—</div><div class="metric-lbl">Cost function</div></div>
+        <div class="metric-card"><div class="metric-val" id="m-candidates">—</div><div class="metric-lbl">Candidates</div></div>
+        <div class="metric-card"><div class="metric-val" id="m-time">0s</div><div class="metric-lbl">Elapsed</div></div>
+      </div>
+      <div>
+        <div class="section-label">Run log</div>
+        <div class="log" id="run-log"></div>
+      </div>
+    </div>
+
+    <!-- RESULTS VIEW -->
+    <div class="content" id="view-results" style="display:none">
+      <div id="results-empty" class="empty-state">No results yet — run an optimisation first.</div>
+      <div id="results-content" style="display:none;flex-direction:column;gap:16px">
+        <div class="results-grid" id="results-grid"></div>
+        <div id="baseline-section" style="display:none">
+          <div class="section-label">QAOA vs Classical</div>
+          <div id="baseline-comparison"></div>
+        </div>
+        <div>
+          <div class="section-label">Winning variant — feature axes</div>
+          <table class="axes-table" id="axes-table"></table>
+        </div>
+        <div id="prompt-section" style="display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div class="section-label" style="margin-bottom:0">Final prompt — ready to use</div>
+            <button onclick="copyPrompt()" id="copy-btn" style="font-size:11px;padding:4px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:none;cursor:pointer;color:var(--color-text-secondary)">Copy</button>
+          </div>
+          <pre id="winning-prompt" style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:12px 14px;font-family:var(--font-mono);font-size:11px;color:var(--color-text-primary);white-space:pre-wrap;word-break:break-word;line-height:1.6;margin:0"></pre>
+        </div>
+        <div id="candidates-section">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div class="section-label" style="margin-bottom:0">Deep-evaluated candidates</div>
+            <button onclick="exportResultsCSV()" style="font-size:11px;padding:4px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:none;cursor:pointer;color:var(--color-text-secondary)">Export CSV</button>
+          </div>
+          <div id="candidates-table"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BATCH VIEW -->
+    <div class="content" id="view-batch" style="display:none">
+      <div>
+        <div class="section-label">Prompt goals</div>
+        <textarea id="batch-goals" style="width:100%;height:120px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);padding:10px 12px;font-family:var(--font-sans);font-size:13px;resize:none;line-height:1.5" placeholder="One prompt goal per line…&#10;Extract structured appointment data from patient messages…&#10;Summarise a support ticket into a one-line status update…"></textarea>
+      </div>
+      <div class="row">
+        <div class="field">
+          <div class="section-label">Runs per goal</div>
+          <select id="batch-runs">
+            <option value="1">1 run</option>
+            <option value="3" selected>3 runs</option>
+            <option value="5">5 runs</option>
+            <option value="10">10 runs</option>
+          </select>
+        </div>
+        <div class="field">
+          <div class="section-label">Quantum backend</div>
+          <div class="toggle-row" id="batch-backend-toggle">
+            <button class="toggle-btn active" data-value="stub">Stub</button>
+            <button class="toggle-btn" data-value="lightning">Lightning</button>
+          </div>
+        </div>
+      </div>
+      <button class="run-btn" id="batch-run-btn" onclick="runBatch()">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="3,1 13,7 3,13"/></svg>
+        Run batch
+      </button>
+      <div id="batch-progress" style="display:none">
+        <div class="section-label">Progress</div>
+        <div id="batch-progress-list" style="display:flex;flex-direction:column;gap:4px;font-size:12px"></div>
+      </div>
+      <div id="batch-results" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div class="section-label" style="margin-bottom:0">Results</div>
+          <button onclick="exportBatchCSV()" style="font-size:11px;padding:4px 10px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:none;cursor:pointer;color:var(--color-text-secondary)">Export CSV</button>
+        </div>
+        <div id="batch-aggregate" style="margin-bottom:10px"></div>
+        <div id="batch-table"></div>
+      </div>
+    </div>
+
+    <!-- HISTORY VIEW -->
+    <div class="content" id="view-history" style="display:none">
+      <div class="section-label">Previous runs</div>
+      <div id="history-list"><div class="empty-state">Loading history…</div></div>
+      <div style="margin-top:8px">
+        <button onclick="exportHistory()" style="font-size:12px;padding:6px 12px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:none;cursor:pointer;color:var(--color-text-secondary)">Export history as JSON</button>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+let currentRunId = null;
+let activeSSE = null;
+let elapsedTimer = null;
+let elapsedStart = null;
+let lastResult = null;
+
+// ── Navigation ───────────────────────────────────────────────────────────────
+function switchView(v) {
+  ['run','progress','results','history','batch'].forEach(id => {
+    document.getElementById('view-' + id).style.display = id === v ? 'flex' : 'none';
+  });
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.view === v);
+  });
+  const titles = {run:'New run', progress:'Run progress', results:'Results', history:'Run history', batch:'Batch runs'};
+  document.getElementById('view-title').textContent = titles[v];
+  if (v === 'history') loadHistory();
+}
+
+// ── Toggle buttons ───────────────────────────────────────────────────────────
+document.querySelectorAll('.toggle-row').forEach(row => {
+  row.addEventListener('click', e => {
+    const btn = e.target.closest('.toggle-btn');
+    if (!btn) return;
+    row.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+function getToggleValue(id) {
+  const active = document.querySelector('#' + id + ' .toggle-btn.active');
+  return active ? active.dataset.value : null;
+}
+
+// ── Run ───────────────────────────────────────────────────────────────────────
+async function runOptimisation() {
+  const goal = document.getElementById('input-goal').value.trim();
+  if (!goal) { alert('Enter a prompt goal first.'); return; }
+
+  const backend = getToggleValue('backend-toggle');
+
+  // Disable run button
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+  btn.textContent = 'Starting…';
+
+  // Reset progress view
+  resetProgress();
+  switchView('progress');
+
+  try {
+    const resp = await fetch('/api/runs', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({goal, quantum_backend: backend}),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'start failed');
+
+    currentRunId = data.run_id;
+    elapsedStart = Date.now();
+    elapsedTimer = setInterval(() => {
+      const s = Math.floor((Date.now() - elapsedStart) / 1000);
+      document.getElementById('m-time').textContent = s + 's';
+    }, 1000);
+
+    connectSSE(currentRunId);
+  } catch (err) {
+    appendLog('error', new Date().toLocaleTimeString('en-AU', {hour12:false}), 'Failed to start: ' + err.message);
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="3,1 13,7 3,13"/></svg> Run optimisation';
+  }
+}
+
+// ── SSE ───────────────────────────────────────────────────────────────────────
+function connectSSE(runId) {
+  if (activeSSE) activeSSE.close();
+  activeSSE = new EventSource('/api/runs/' + runId + '/events');
+
+  activeSSE.onmessage = e => {
+    const event = JSON.parse(e.data);
+    handleEvent(event, runId);
+  };
+
+  activeSSE.onerror = () => {
+    appendLog('error', now(), 'SSE connection lost');
+    activeSSE.close();
+  };
+}
+
+function handleEvent(event, runId) {
+  switch (event.type) {
+    case 'stage':
+      updateStage(event.stage, event.status);
+      break;
+    case 'log':
+      appendLog(event.level, event.time, event.message);
+      break;
+    case 'metric':
+      updateMetric(event.key, event.value);
+      break;
+    case 'run_id':
+      // Server resolved the actual run_id (may differ from pre-assigned)
+      currentRunId = event.run_id;
+      break;
+    case 'done':
+      clearInterval(elapsedTimer);
+      activeSSE.close();
+      document.getElementById('run-btn').disabled = false;
+      document.getElementById('run-btn').innerHTML =
+        '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="3,1 13,7 3,13"/></svg> Run optimisation';
+      appendLog('ok', now(), `Done — score ${event.winning_score.toFixed(3)} in ${event.total_latency_s}s`);
+      loadResults(event.run_id || currentRunId);
+      break;
+    case 'error':
+      appendLog('error', now(), event.message);
+      clearInterval(elapsedTimer);
+      activeSSE.close();
+      document.getElementById('run-btn').disabled = false;
+      document.getElementById('run-btn').innerHTML =
+        '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="3,1 13,7 3,13"/></svg> Run optimisation';
+      break;
+  }
+}
+
+// ── Progress helpers ──────────────────────────────────────────────────────────
+function resetProgress() {
+  for (let i = 1; i <= 5; i++) {
+    const dot = document.getElementById('dot-' + i);
+    const name = document.getElementById('name-' + i);
+    dot.className = 'stage-dot';
+    name.className = 'stage-name';
+  }
+  document.getElementById('run-log').innerHTML = '';
+  document.getElementById('m-iteration').textContent = '—';
+  document.getElementById('m-cost').textContent = '—';
+  document.getElementById('m-candidates').textContent = '—';
+  document.getElementById('m-time').textContent = '0s';
+}
+
+function updateStage(n, status) {
+  const dot = document.getElementById('dot-' + n);
+  const name = document.getElementById('name-' + n);
+  dot.className = 'stage-dot ' + (status === 'done' ? 'done' : 'active');
+  name.className = 'stage-name ' + (status === 'active' ? 'active' : '');
+}
+
+function appendLog(level, time, message) {
+  const log = document.getElementById('run-log');
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  const sym = level === 'ok' ? '✓' : level === 'error' ? '✗' : '→';
+  const cls = level === 'ok' ? 'log-ok' : level === 'error' ? 'log-error' : 'log-info';
+  line.innerHTML = `<span class="log-time">${time}</span><span class="${cls}">${sym}</span><span>${escHtml(message)}</span>`;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function updateMetric(key, value) {
+  const map = {iteration: 'm-iteration', cost: 'm-cost', candidates: 'm-candidates'};
+  const el = document.getElementById(map[key]);
+  if (el) el.textContent = value;
+}
+
+// ── Results ───────────────────────────────────────────────────────────────────
+async function loadResults(runId) {
+  // Poll until persisted (pipeline thread may still be writing)
+  let data = null;
+  for (let i = 0; i < 10; i++) {
+    const r = await fetch('/api/runs/' + runId);
+    const j = await r.json();
+    if (j.result) { data = j; break; }
+    await new Promise(res => setTimeout(res, 500));
+  }
+
+  if (!data || !data.result) {
+    switchView('results');
+    document.getElementById('results-empty').style.display = '';
+    document.getElementById('results-content').style.display = 'none';
+    return;
+  }
+
+  lastResult = data;
+  const res = data.result;
+  const winScore = res.winning_score != null ? res.winning_score.toFixed(3) : '—';
+  const latency = res.total_latency_s != null ? formatDuration(res.total_latency_s) : '—';
+  const meanPre = res.metadata && res.metadata.mean_pre_score != null
+    ? res.metadata.mean_pre_score.toFixed(3) : '—';
+  const deepModel = res.metadata && res.metadata.deepeval_model || 'deep eval';
+  const preModel = res.metadata && res.metadata.prescorer_model || 'pre-scorer';
+
+  document.getElementById('results-grid').innerHTML = `
+    <div class="result-card winner">
+      <div class="result-label">Winning variant — ${(res.winning_variant && res.winning_variant.variant_id || '').slice(0,14)}</div>
+      <div class="result-score">${winScore}</div>
+      <div class="result-label" style="font-family:var(--font-mono)">${escHtml(deepModel)}</div>
+      <div style="margin-top:4px;font-size:11px;color:var(--color-text-secondary)">${escHtml(preModel)} mean: ${meanPre}</div>
+    </div>
+    <div class="result-card">
+      <div class="result-label">Candidate space</div>
+      <div class="result-score">${res.candidate_space_size || '—'}</div>
+      <div class="result-label">total variants (2^N axes)</div>
+      <div style="margin-top:4px;font-size:11px;color:var(--color-text-secondary)">Backend: ${res.quantum_backend || '—'}</div>
+    </div>
+    <div class="result-card">
+      <div class="result-label">QAOA shortlist</div>
+      <div class="result-score">${res.metadata && res.metadata.shortlist_size || res.total_evaluations || '—'}</div>
+      <div class="result-label">deep-evaluated of ${res.candidate_space_size || '—'}</div>
+    </div>
+    <div class="result-card">
+      <div class="result-label">Wall-clock time</div>
+      <div class="result-score">${latency}</div>
+      <div class="result-label">total pipeline duration</div>
+    </div>
+  `;
+
+  const axes = res.winning_variant && res.winning_variant.feature_values || {};
+  document.getElementById('axes-table').innerHTML = Object.entries(axes).map(([k, v]) =>
+    `<tr><td>${escHtml(k)}</td><td><span class="pill${v === 0 ? ' off' : ''}">${v === 1 ? 'on' : 'off'}</span></td></tr>`
+  ).join('');
+
+  // QAOA vs Classical baseline
+  if (res.classical_winner_score != null) {
+    const qaoa = res.winning_score;
+    const classical = res.classical_winner_score;
+    const delta = qaoa - classical;
+    const sameWinner = res.winning_variant && res.classical_winner_variant &&
+      res.winning_variant.variant_id === res.classical_winner_variant.variant_id;
+    const overlap = res.classical_overlap || 0;
+    const deltaColor = delta > 0 ? 'var(--color-text-success)' : delta < 0 ? '#dc2626' : 'var(--color-text-secondary)';
+    const deltaLabel = delta > 0 ? `+${delta.toFixed(3)} QAOA wins` : delta < 0 ? `${delta.toFixed(3)} classical wins` : 'tied';
+    document.getElementById('baseline-comparison').innerHTML = `
+      <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px 14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;font-size:12px">
+        <div><div style="font-size:18px;font-weight:500">${qaoa.toFixed(3)}</div><div style="color:var(--color-text-tertiary);margin-top:2px">QAOA winner</div></div>
+        <div><div style="font-size:18px;font-weight:500">${classical.toFixed(3)}</div><div style="color:var(--color-text-tertiary);margin-top:2px">Classical top-K</div></div>
+        <div><div style="font-size:18px;font-weight:500;color:${deltaColor}">${deltaLabel}</div><div style="color:var(--color-text-tertiary);margin-top:2px">${overlap} candidates shared · ${sameWinner ? 'same winner' : 'different winners'}</div></div>
+      </div>`;
+    document.getElementById('baseline-section').style.display = '';
+  } else {
+    document.getElementById('baseline-section').style.display = 'none';
+  }
+
+  // Final prompt
+  const promptText = res.winning_variant && res.winning_variant.prompt_text;
+  if (promptText) {
+    document.getElementById('winning-prompt').textContent = promptText;
+    document.getElementById('prompt-section').style.display = '';
+  } else {
+    document.getElementById('prompt-section').style.display = 'none';
+  }
+
+  // Candidates table — show all deep-eval'd variants sorted by score
+  const evals = res.eval_results || [];
+  if (evals.length > 0) {
+    const sorted = [...evals].sort((a, b) => b.score - a.score);
+    const winId = res.winning_variant && res.winning_variant.variant_id;
+    const allAxes = Object.keys(sorted[0].candidate.feature_values || {});
+    document.getElementById('candidates-table').innerHTML = `
+      <div style="overflow-x:auto">
+        <table style="width:100%;font-size:11px;border-collapse:collapse;font-family:var(--font-mono)">
+          <thead>
+            <tr style="border-bottom:1px solid var(--color-border-secondary)">
+              <th style="padding:4px 8px;text-align:left;font-weight:500;color:var(--color-text-tertiary)">Score</th>
+              ${allAxes.map(a => `<th style="padding:4px 6px;text-align:center;font-weight:500;color:var(--color-text-tertiary);white-space:nowrap">${escHtml(a)}</th>`).join('')}
+              <th style="padding:4px 8px;text-align:left;font-weight:500;color:var(--color-text-tertiary)">Reasoning</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sorted.map(er => {
+              const isWin = er.candidate.variant_id === winId;
+              const fv = er.candidate.feature_values || {};
+              return `<tr style="border-bottom:0.5px solid var(--color-border-tertiary);${isWin ? 'background:var(--color-background-info)' : ''}">
+                <td style="padding:4px 8px;font-weight:${isWin?'500':'400'};color:${isWin?'var(--color-text-info)':'var(--color-text-primary)'}">${er.score.toFixed(3)}${isWin?' ★':''}</td>
+                ${allAxes.map(a => `<td style="padding:4px 6px;text-align:center"><span class="pill${fv[a]===0?' off':''}">${fv[a]===1?'on':'off'}</span></td>`).join('')}
+                <td style="padding:4px 8px;color:var(--color-text-secondary);font-family:var(--font-sans);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(er.reasoning)}">${escHtml((er.reasoning||'').slice(0,80))}${er.reasoning&&er.reasoning.length>80?'…':''}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+    document.getElementById('candidates-section').style.display = '';
+  } else {
+    document.getElementById('candidates-section').style.display = 'none';
+  }
+
+  document.getElementById('results-empty').style.display = 'none';
+  document.getElementById('results-content').style.display = 'flex';
+  switchView('results');
+}
+
+// ── History ───────────────────────────────────────────────────────────────────
+async function loadHistory() {
+  const container = document.getElementById('history-list');
+  try {
+    const resp = await fetch('/api/runs');
+    const runs = await resp.json();
+    if (!runs.length) {
+      container.innerHTML = '<div class="empty-state">No runs yet.</div>';
+      return;
+    }
+    container.innerHTML = runs.map(r => `
+      <div class="hist-row" onclick="fetchAndShowResult('${r.run_id}')" style="cursor:pointer">
+        <span class="hist-score">${r.score != null ? r.score.toFixed(2) : '—'}</span>
+        <span class="hist-meta"><strong>${escHtml(r.goal.slice(0,60))}${r.goal.length > 60 ? '…' : ''}</strong></span>
+        <span class="hist-badge">${escHtml(r.backend)}</span>
+        <span style="font-size:11px;color:var(--color-text-tertiary)">${fmtDate(r.created_at)}</span>
+      </div>
+    `).join('');
+  } catch {
+    container.innerHTML = '<div class="empty-state">Failed to load history.</div>';
+  }
+}
+
+async function fetchAndShowResult(runId) {
+  currentRunId = runId;
+  await loadResults(runId);
+}
+
+function exportHistory() {
+  fetch('/api/runs').then(r => r.json()).then(data => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'qpo-history.json';
+    a.click();
+  });
+}
+
+function copyPrompt() {
+  const text = document.getElementById('winning-prompt').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+  });
+}
+
+function exportResultsCSV() {
+  if (!lastResult || !lastResult.result) return;
+  const res = lastResult.result;
+  const evals = res.eval_results || [];
+  if (!evals.length) return;
+  const axes = Object.keys(evals[0].candidate.feature_values || {});
+  const winId = res.winning_variant && res.winning_variant.variant_id;
+  const header = ['run_id','score','winner',...axes,'model','reasoning','latency_ms'];
+  const rows = [...evals]
+    .sort((a, b) => b.score - a.score)
+    .map(er => [
+      res.run_id,
+      er.score.toFixed(4),
+      er.candidate.variant_id === winId ? '1' : '0',
+      ...axes.map(a => er.candidate.feature_values[a]),
+      er.model,
+      '"' + (er.reasoning || '').replace(/"/g, '""') + '"',
+      er.latency_ms.toFixed(0),
+    ]);
+  const csv = [header, ...rows].map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], {type: 'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `qpo-${res.run_id.slice(0,8)}.csv`;
+  a.click();
+}
+
+// ── Batch ─────────────────────────────────────────────────────────────────────
+let activeBatchSSE = null;
+let batchResults = [];
+
+async function runBatch() {
+  const raw = document.getElementById('batch-goals').value.trim();
+  const goals = raw.split('\n').map(s => s.trim()).filter(Boolean);
+  if (!goals.length) { alert('Enter at least one goal.'); return; }
+
+  const backend = getToggleValue('batch-backend-toggle');
+  const runs_per_goal = parseInt(document.getElementById('batch-runs').value);
+
+  const btn = document.getElementById('batch-run-btn');
+  btn.disabled = true;
+  btn.textContent = 'Starting…';
+  batchResults = [];
+  document.getElementById('batch-progress-list').innerHTML = '';
+  document.getElementById('batch-progress').style.display = '';
+  document.getElementById('batch-results').style.display = 'none';
+
+  try {
+    const resp = await fetch('/api/batch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({goals, quantum_backend: backend, runs_per_goal}),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'start failed');
+    connectBatchSSE(data.batch_id);
+  } catch (err) {
+    alert('Batch failed to start: ' + err.message);
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="3,1 13,7 3,13"/></svg> Run batch';
+  }
+}
+
+function connectBatchSSE(batchId) {
+  if (activeBatchSSE) activeBatchSSE.close();
+  activeBatchSSE = new EventSource('/api/batch/' + batchId + '/events');
+  activeBatchSSE.onmessage = e => {
+    const ev = JSON.parse(e.data);
+    if (ev.type === 'batch_progress') {
+      const pct = Math.round((ev.done / ev.total) * 100);
+      const list = document.getElementById('batch-progress-list');
+      const id = 'bp-' + ev.done;
+      let el = document.getElementById(id);
+      if (!el) {
+        el = document.createElement('div');
+        el.id = id;
+        el.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:0.5px solid var(--color-border-tertiary)';
+        list.appendChild(el);
+      }
+      el.innerHTML = `<span style="color:var(--color-text-tertiary);min-width:32px">${pct}%</span><span style="color:var(--color-text-secondary)">${escHtml(ev.goal)}${ev.runs_per_goal > 1 ? ' <span style="color:var(--color-text-tertiary)">(run '+ev.rep+'/'+ev.runs_per_goal+')</span>' : ''}</span>`;
+    } else if (ev.type === 'batch_done') {
+      activeBatchSSE.close();
+      document.getElementById('batch-run-btn').disabled = false;
+      document.getElementById('batch-run-btn').innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="3,1 13,7 3,13"/></svg> Run batch';
+      renderBatchResults(ev.results);
+    } else if (ev.type === 'error') {
+      activeBatchSSE.close();
+      alert('Batch error: ' + ev.message);
+      document.getElementById('batch-run-btn').disabled = false;
+      document.getElementById('batch-run-btn').innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="3,1 13,7 3,13"/></svg> Run batch';
+    }
+  };
+}
+
+function renderBatchResults(results) {
+  batchResults = results;
+  const wins = results.filter(r => (r.delta || 0) > 0).length;
+  const ties = results.filter(r => (r.delta || 0) === 0).length;
+  const losses = results.filter(r => (r.delta || 0) < 0).length;
+  const meanDelta = results.reduce((s, r) => s + (r.delta || 0), 0) / results.length;
+  const deltaColor = meanDelta > 0 ? 'var(--color-text-success)' : meanDelta < 0 ? '#dc2626' : 'var(--color-text-secondary)';
+
+  document.getElementById('batch-aggregate').innerHTML = `
+    <div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px 14px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:12px">
+      <div><div style="font-size:16px;font-weight:500;color:var(--color-text-success)">${wins}</div><div style="color:var(--color-text-tertiary)">QAOA wins</div></div>
+      <div><div style="font-size:16px;font-weight:500">${ties}</div><div style="color:var(--color-text-tertiary)">Tied</div></div>
+      <div><div style="font-size:16px;font-weight:500;color:#dc2626">${losses}</div><div style="color:var(--color-text-tertiary)">Classical wins</div></div>
+      <div><div style="font-size:16px;font-weight:500;color:${deltaColor}">${meanDelta >= 0 ? '+' : ''}${meanDelta.toFixed(3)}</div><div style="color:var(--color-text-tertiary)">Mean delta</div></div>
+    </div>`;
+
+  document.getElementById('batch-table').innerHTML = `
+    <table style="width:100%;font-size:11px;border-collapse:collapse">
+      <thead><tr style="border-bottom:1px solid var(--color-border-secondary)">
+        <th style="padding:4px 8px;text-align:left;color:var(--color-text-tertiary);font-weight:500">Goal</th>
+        <th style="padding:4px 8px;text-align:right;color:var(--color-text-tertiary);font-weight:500">QAOA</th>
+        <th style="padding:4px 8px;text-align:right;color:var(--color-text-tertiary);font-weight:500">Classical</th>
+        <th style="padding:4px 8px;text-align:right;color:var(--color-text-tertiary);font-weight:500">Δ</th>
+        <th style="padding:4px 8px;text-align:center;color:var(--color-text-tertiary);font-weight:500">Same</th>
+        <th style="padding:4px 8px;text-align:right;color:var(--color-text-tertiary);font-weight:500">Time</th>
+      </tr></thead>
+      <tbody>${results.map(r => {
+        const d = r.delta || 0;
+        const dc = d > 0 ? 'var(--color-text-success)' : d < 0 ? '#dc2626' : 'var(--color-text-secondary)';
+        return `<tr style="border-bottom:0.5px solid var(--color-border-tertiary)">
+          <td style="padding:4px 8px;color:var(--color-text-secondary);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(r.goal)}">${escHtml(r.goal.slice(0, 55))}${r.goal.length > 55 ? '…' : ''}</td>
+          <td style="padding:4px 8px;text-align:right;font-family:var(--font-mono)">${r.qaoa_score != null ? r.qaoa_score.toFixed(3) : '—'}</td>
+          <td style="padding:4px 8px;text-align:right;font-family:var(--font-mono)">${r.classical_score != null ? r.classical_score.toFixed(3) : '—'}</td>
+          <td style="padding:4px 8px;text-align:right;font-family:var(--font-mono);color:${dc}">${d >= 0 ? '+' : ''}${d.toFixed(3)}</td>
+          <td style="padding:4px 8px;text-align:center">${r.same_winner ? '✓' : '✗'}</td>
+          <td style="padding:4px 8px;text-align:right;color:var(--color-text-tertiary)">${r.latency_s}s</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  document.getElementById('batch-results').style.display = '';
+}
+
+function exportBatchCSV() {
+  if (!batchResults.length) return;
+  const header = ['run_id','goal','qaoa_score','classical_score','delta','same_winner','classical_overlap','latency_s'];
+  const rows = batchResults.map(r => [
+    r.run_id, `"${(r.goal||'').replace(/"/g,'""')}"`,
+    r.qaoa_score, r.classical_score, r.delta,
+    r.same_winner ? 1 : 0, r.classical_overlap, r.latency_s,
+  ]);
+  const csv = [header, ...rows].map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], {type: 'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `qpo-batch-${Date.now()}.csv`;
+  a.click();
+}
+
+// ── Status ────────────────────────────────────────────────────────────────────
+async function refreshStatus() {
+  try {
+    const resp = await fetch('/api/status');
+    const s = await resp.json();
+    setStatus('status-prescorer', s.prescorer_status || s['7b_local']);
+    setStatus('status-deepeval', s.deepeval_status || s['32b_remote']);
+    setStatus('status-quantum', s.quantum);
+    if (s.prescorer_model) {
+      document.getElementById('label-prescorer').textContent = s.prescorer_model;
+      document.getElementById('label-prescorer').title = s.prescorer_model;
+      document.getElementById('info-prescorer-model').textContent = s.prescorer_model;
+    }
+    if (s.deepeval_model) {
+      document.getElementById('label-deepeval').textContent = s.deepeval_model;
+      document.getElementById('label-deepeval').title = s.deepeval_model;
+      document.getElementById('info-deepeval-model').textContent = s.deepeval_model;
+    }
+    if (s.quantum_backend) {
+      document.getElementById('label-quantum').textContent = s.quantum_backend;
+    }
+  } catch { /* silent */ }
+}
+
+function setStatus(id, state) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const online = state === 'online' || state === 'ready';
+  el.innerHTML = `<span class="status-dot ${online ? 'online' : 'offline'}"></span>${state}`;
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function now() {
+  return new Date().toLocaleTimeString('en-AU', {hour12:false});
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function formatDuration(s) {
+  if (s < 60) return s.toFixed(1) + 's';
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return m + 'm ' + sec + 's';
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso.replace(' ', 'T') + 'Z');
+  const now2 = new Date();
+  const diff = (now2 - d) / 1000;
+  if (diff < 86400) return 'today';
+  if (diff < 172800) return 'yesterday';
+  return Math.floor(diff / 86400) + ' days ago';
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+refreshStatus();
+setInterval(refreshStatus, 15000);
+</script>
+</body>
+</html>
