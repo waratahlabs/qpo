@@ -1,0 +1,14 @@
+# QPO sample goals — Phase 2 batch input
+# 10 goals across diverse task types: compositional, analytical, creative, structured, adversarial
+# Usage: POST /api/batch {"goals": [...lines below...], "backend": "qaoa", "runs_per_goal": 10}
+
+Write a git commit message for a refactor that splits a monolithic auth module into three composable middlewares
+Explain the trade-offs between QUBO and QAOA formulations for combinatorial optimisation to a senior ML engineer
+Summarise this incident report and identify the root cause and three action items
+Generate a Python function docstring that is precise, concise, and includes an example
+Draft a cold outreach email introducing a new identity verification library to a potential enterprise customer
+Rewrite this paragraph to be 30% shorter without losing technical accuracy
+Create a structured YAML config for a CI pipeline that runs tests, lints, and builds a Docker image
+Analyse this code diff and flag any security issues with a brief explanation of each
+Write a one-paragraph abstract for a research paper on quantum-assisted prompt feature selection
+Translate this informal Slack message into a formal engineering RFC opening paragraph

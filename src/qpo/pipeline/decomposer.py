@@ -14,6 +14,7 @@ import re
 import requests
 
 from qpo.models import DecomposedGoal, Intent
+from qpo.pipeline.utils import post_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +70,11 @@ class Decomposer:
     def _decompose_via_llm(self, intent: Intent) -> DecomposedGoal:
         prompt = _DECOMPOSE_PROMPT.format(goal=intent.goal, context=intent.context or "")
 
-        response = requests.post(
+        response = post_with_retry(
             f"{self.ollama_endpoint}/api/generate",
-            json={"model": self.model, "prompt": prompt, "stream": False, "think": False},
+            json_body={"model": self.model, "prompt": prompt, "stream": False, "think": False},
             timeout=self.timeout_s,
         )
-        response.raise_for_status()
         text = response.json()["response"]
 
         match = re.search(r"\{.*\}", text, re.DOTALL)

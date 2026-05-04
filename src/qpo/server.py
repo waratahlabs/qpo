@@ -1,19 +1,26 @@
 """QPO web server — Flask backend for the test harness UI.
 
 Routes:
-  GET  /                        → serve UI
-  POST /api/runs                → start a pipeline run
-  GET  /api/runs/<id>/events    → SSE stream of run events
-  GET  /api/runs/<id>           → completed run result (JSON)
-  GET  /api/runs                → run history list
-  GET  /api/status              → backend health check
+  GET  /                            → serve UI
+  POST /api/runs                    → start a pipeline run
+  GET  /api/runs/<id>/events        → SSE stream of run events
+  GET  /api/runs/<id>               → completed run result (JSON)
+  GET  /api/runs                    → run history list
+  POST /api/batch                   → start a pipeline batch (job-pull model)
+  GET  /api/batch/<id>/events       → SSE stream of batch events
+  GET  /api/batch/<id>              → batch result + job progress
+  GET  /api/batch                   → batch history list
+  POST /api/batch/<id>/resume       → requeue failed jobs and resume
+  GET  /api/status                  → backend health check
 """
 
 import json
 import logging
+import os
 import queue
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Generator
 
@@ -22,7 +29,9 @@ from flask import Flask, Response, jsonify, request
 
 from qpo import Intent, Pipeline
 from qpo.config import get_config
-from qpo.db import (get_batch, get_run, init_db, list_batches, list_runs,
+from qpo.db import (claim_next_job, complete_job, create_jobs, fail_job,
+                    get_batch, get_batch_jobs, get_batch_progress, get_run,
+                    init_db, list_batches, list_runs, requeue_failed_jobs,
                     save_batch, save_run, update_batch)
 from qpo.quantum.optimizer import QuantumOptimizer
 
@@ -33,9 +42,16 @@ app.config["JSON_SORT_KEYS"] = False
 
 # Per-run event queues: run_id → Queue[dict | None]
 _run_queues: dict[str, queue.Queue] = {}
+# Per-run replay buffer for SSE reconnection. Bounded to MAX_EVENT_BUFFER per
+# run; oldest events are dropped when full. Cleaned up alongside _run_queues.
+_run_event_buffers: dict[str, list[dict]] = {}
 _run_queues_lock = threading.Lock()
 
+MAX_EVENT_BUFFER = 200
+
 _HTML_PATH = Path(__file__).parent.parent.parent / "ui.html"
+
+MAX_JOB_ATTEMPTS = 3
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +66,7 @@ def index() -> Response:
 
 
 # ---------------------------------------------------------------------------
-# API
+# API — single runs
 # ---------------------------------------------------------------------------
 
 @app.route("/api/runs", methods=["POST"])
@@ -60,9 +76,7 @@ def start_run() -> Response:
     if not goal:
         return jsonify({"error": "goal is required"}), 400
 
-    backend = body.get("quantum_backend", "stub")
-    pre_score_model = body.get("pre_score_model", "7b-local")
-    deep_eval_model = body.get("deep_eval_model", "32b-remote")
+    backend = body.get("quantum_backend", body.get("backend", "stub"))
 
     config = get_config()
     optimizer = QuantumOptimizer(
@@ -75,74 +89,51 @@ def start_run() -> Response:
         quantum_optimizer=optimizer,
         max_candidates=config.pipeline.max_candidates,
         qaoa_prefilter_size=config.pipeline.qaoa_prefilter_size,
+        history_endpoint=os.environ.get("QPO_SERVER_URL", "http://localhost:5001"),
     )
     intent = Intent(goal=goal)
 
-    # Create an event queue for this run
+    # Create an event queue + bounded replay buffer for this run
     run_q: queue.Queue = queue.Queue()
-    run_id_holder: list[str] = []
+    event_buffer: list[dict] = []
 
     def on_event(event: dict) -> None:
-        # Capture run_id from the done event so we can key the queue
+        with _run_queues_lock:
+            event_buffer.append(event)
+            if len(event_buffer) > MAX_EVENT_BUFFER:
+                del event_buffer[0:len(event_buffer) - MAX_EVENT_BUFFER]
         run_q.put(event)
 
-    def run_pipeline() -> None:
-        try:
-            result = pipeline.run(intent, on_event=on_event)
-            save_run(
-                run_id=result.run_id,
-                goal=goal,
-                backend=backend,
-                score=result.winning_score or 0.0,
-                latency_s=result.total_latency_s,
-                result_json=result.model_dump_json(),
-            )
-            with _run_queues_lock:
-                _run_queues[result.run_id] = run_q
-            run_id_holder.append(result.run_id)
-        except Exception as exc:
-            run_q.put({"type": "error", "message": str(exc)})
-            logger.exception("Pipeline run failed")
-        finally:
-            run_q.put(None)  # sentinel
-
-    # We need the run_id before the thread finishes.
-    # Extract it from the queue's first event after thread starts.
-    # Use a pre-assigned ID by wrapping the pipeline constructor.
-    import uuid
     pre_assigned_id = str(uuid.uuid4())
 
-    # Override: inject run_id into the pipeline's run() by monkey-patching uuid
-    # Simpler: just start the thread and let the client poll /api/runs/<id>
-    # after the server returns the pre-assigned id.
-
-    # Store the queue under the pre-assigned id immediately
     with _run_queues_lock:
         _run_queues[pre_assigned_id] = run_q
+        _run_event_buffers[pre_assigned_id] = event_buffer
 
     def run_pipeline_with_id() -> None:
         try:
-            # Patch the intent with extra metadata so pipeline picks up our id
-            result = pipeline.run(intent, on_event=on_event)
-            # Re-key queue under the actual run_id
-            with _run_queues_lock:
-                if result.run_id != pre_assigned_id:
-                    _run_queues[result.run_id] = _run_queues.pop(pre_assigned_id, run_q)
-            save_run(
-                run_id=result.run_id,
-                goal=goal,
-                backend=backend,
-                score=result.winning_score or 0.0,
-                latency_s=result.total_latency_s,
-                result_json=result.model_dump_json(),
-            )
-            # Patch done event with actual run_id
-            run_q.put({"type": "run_id", "run_id": result.run_id})
+            result = pipeline.run(intent, on_event=on_event, run_id=pre_assigned_id)
+            try:
+                save_run(
+                    run_id=result.run_id,
+                    goal=goal,
+                    backend=backend,
+                    score=result.winning_score or 0.0,
+                    latency_s=result.total_latency_s,
+                    result_json=result.model_dump_json(),
+                )
+            except Exception as db_exc:
+                logger.exception("save_run failed for %s", result.run_id)
+                on_event({"type": "db_error", "message": str(db_exc), "run_id": result.run_id})
+            on_event({"type": "run_id", "run_id": result.run_id})
         except Exception as exc:
-            run_q.put({"type": "error", "message": str(exc)})
+            on_event({"type": "error", "message": str(exc)})
             logger.exception("Pipeline run failed")
         finally:
             run_q.put(None)
+            with _run_queues_lock:
+                _run_queues.pop(pre_assigned_id, None)
+                _run_event_buffers.pop(pre_assigned_id, None)
 
     t = threading.Thread(target=run_pipeline_with_id, daemon=True)
     t.start()
@@ -153,17 +144,22 @@ def start_run() -> Response:
 @app.route("/api/runs/<run_id>/events")
 def run_events(run_id: str) -> Response:
     def generate() -> Generator[str, None, None]:
-        # Wait up to 5s for the queue to appear (pipeline thread may not have started yet)
         deadline = time.monotonic() + 5.0
         while True:
             with _run_queues_lock:
                 q = _run_queues.get(run_id)
+                buf_snapshot = list(_run_event_buffers.get(run_id, []))
             if q is not None:
                 break
             if time.monotonic() > deadline:
                 yield _sse({"type": "error", "message": "run not found"})
                 return
             time.sleep(0.1)
+
+        # Replay buffered events first so reconnecting clients see history.
+        seen = len(buf_snapshot)
+        for ev in buf_snapshot:
+            yield _sse(ev)
 
         while True:
             try:
@@ -173,6 +169,12 @@ def run_events(run_id: str) -> Response:
                 continue
             if event is None:
                 break
+            # Skip events the buffer replay already delivered. The on_event
+            # handler appends to the buffer before put() on the queue, so the
+            # first `seen` queue events are duplicates of the replay.
+            if seen > 0:
+                seen -= 1
+                continue
             yield _sse(event)
 
     return Response(
@@ -188,7 +190,6 @@ def run_events(run_id: str) -> Response:
 
 @app.route("/api/runs/<run_id>")
 def get_run_result(run_id: str) -> Response:
-    # Check live queues first (run may still be in progress)
     with _run_queues_lock:
         in_progress = run_id in _run_queues
 
@@ -202,7 +203,120 @@ def get_run_result(run_id: str) -> Response:
 
 @app.route("/api/runs")
 def get_run_history() -> Response:
-    return jsonify(list_runs())
+    full = request.args.get("full", "").lower() in ("1", "true")
+    limit = int(request.args.get("limit", 200))
+    return jsonify(list_runs(limit=limit, full=full))
+
+
+# ---------------------------------------------------------------------------
+# API — batches (job-pull model)
+# ---------------------------------------------------------------------------
+
+
+def _run_batch_worker(batch_id: str, batch_q: queue.Queue, total: int, runs_per_goal: int) -> None:
+    """Pull-model batch worker. Loops until no pending or failed-retryable
+    jobs remain. Safe to invoke either fresh or as a resume — claim_next_job
+    is atomic and requeue_failed_jobs only acts on attempts < MAX."""
+    try:
+        # Requeue once before the claim loop. Calling it inside the loop turns
+        # a fast-failing job into an instant attempts-burner.
+        requeue_failed_jobs(batch_id, MAX_JOB_ATTEMPTS)
+        while True:
+            job = claim_next_job(batch_id)
+            if job is None:
+                break
+
+            progress = get_batch_progress(batch_id)
+            batch_q.put({
+                "type": "batch_progress",
+                "done": progress["complete"],
+                "total": total,
+                "goal": job["goal"][:60],
+                "rep": job["rep"] + 1,
+                "runs_per_goal": runs_per_goal,
+            })
+            try:
+                config = get_config()
+                # Deterministic per-job seed: stable across restarts/resumes
+                # because it depends only on (config seed, goal, rep) — not on
+                # how many other jobs happened to complete first.
+                job_seed = (
+                    config.quantum.seed
+                    + (hash(job["goal"]) & 0xFFFF)
+                    + job["rep"]
+                ) & 0x7FFFFFFF
+                optimizer = QuantumOptimizer(
+                    backend=job["backend"],
+                    circuit_depth=config.quantum.circuit_depth,
+                    num_iterations=config.quantum.num_iterations,
+                    seed=job_seed,
+                )
+                pipeline = Pipeline(
+                    quantum_optimizer=optimizer,
+                    max_candidates=config.pipeline.max_candidates,
+                    qaoa_prefilter_size=config.pipeline.qaoa_prefilter_size,
+                    history_endpoint=os.environ.get("QPO_SERVER_URL", "http://localhost:5001"),
+                )
+                result = pipeline.run(Intent(goal=job["goal"]))
+                result_dict = {
+                    "run_id": result.run_id,
+                    "goal": job["goal"],
+                    "qaoa_score": result.winning_score,
+                    "classical_score": result.classical_winner_score,
+                    "delta": round(
+                        (result.winning_score or 0)
+                        - (result.classical_winner_score or 0),
+                        4,
+                    ),
+                    "same_winner": bool(
+                        result.winning_variant
+                        and result.classical_winner_variant
+                        and result.winning_variant.variant_id
+                        == result.classical_winner_variant.variant_id
+                    ),
+                    "classical_overlap": result.classical_overlap,
+                    "latency_s": round(result.total_latency_s, 2),
+                }
+                # save_run BEFORE complete_job: if persistence fails, the job
+                # stays in 'running' (claim already incremented attempts) and
+                # the exception falls through to fail_job below. Avoids the
+                # split-brain where job=complete but run row is missing.
+                save_run(
+                    run_id=result.run_id,
+                    goal=job["goal"],
+                    backend=job["backend"],
+                    score=result.winning_score or 0.0,
+                    latency_s=result.total_latency_s,
+                    result_json=result.model_dump_json(),
+                )
+                complete_job(job["job_id"], result_dict)
+            except Exception as exc:
+                fail_job(job["job_id"], str(exc))
+                logger.exception("Job %s failed", job["job_id"])
+
+        jobs = get_batch_jobs(batch_id)
+        results = [
+            json.loads(j["result_json"])
+            for j in jobs
+            if j["status"] == "complete" and j["result_json"]
+        ]
+        failed_count = sum(1 for j in jobs if j["status"] == "failed")
+        final_status = "complete" if failed_count == 0 else "partial"
+        update_batch(batch_id, final_status, results)
+        batch_q.put({
+            "type": "batch_done",
+            "batch_id": batch_id,
+            "results": results,
+            "failed": failed_count,
+        })
+    except Exception as exc:
+        batch_q.put({"type": "error", "message": str(exc)})
+        logger.exception("Batch worker crashed for %s", batch_id)
+    finally:
+        batch_q.put(None)
+        with _run_queues_lock:
+            _run_queues.pop(f"batch:{batch_id}", None)
+            _run_event_buffers.pop(f"batch:{batch_id}", None)
 
 
 @app.route("/api/batch", methods=["POST"])
@@ -211,73 +325,23 @@ def start_batch() -> Response:
     goals = [g.strip() for g in body.get("goals", []) if g.strip()]
     if not goals:
         return jsonify({"error": "goals list required"}), 400
-    backend = body.get("quantum_backend", "stub")
+    backend = body.get("quantum_backend", body.get("backend", "stub"))
     runs_per_goal = min(int(body.get("runs_per_goal", 1)), 10)
 
-    import uuid
     batch_id = str(uuid.uuid4())
     save_batch(batch_id, goals, backend, runs_per_goal)
+    create_jobs(batch_id, goals, backend, runs_per_goal)
+    total = len(goals) * runs_per_goal
 
     batch_q: queue.Queue = queue.Queue()
     with _run_queues_lock:
         _run_queues[f"batch:{batch_id}"] = batch_q
 
-    def run_batch() -> None:
-        results: list[dict] = []
-        total = len(goals) * runs_per_goal
-        done = 0
-        try:
-            for goal in goals:
-                goal_results: list[dict] = []
-                for rep in range(runs_per_goal):
-                    batch_q.put({"type": "batch_progress", "done": done, "total": total,
-                                 "goal": goal[:60], "rep": rep + 1, "runs_per_goal": runs_per_goal})
-                    config = get_config()
-                    optimizer = QuantumOptimizer(
-                        backend=backend,
-                        circuit_depth=config.quantum.circuit_depth,
-                        num_iterations=config.quantum.num_iterations,
-                        seed=config.quantum.seed + done,
-                    )
-                    pipeline = Pipeline(
-                        quantum_optimizer=optimizer,
-                        max_candidates=config.pipeline.max_candidates,
-                        qaoa_prefilter_size=config.pipeline.qaoa_prefilter_size,
-                    )
-                    result = pipeline.run(Intent(goal=goal))
-                    save_run(
-                        run_id=result.run_id,
-                        goal=goal,
-                        backend=backend,
-                        score=result.winning_score or 0.0,
-                        latency_s=result.total_latency_s,
-                        result_json=result.model_dump_json(),
-                    )
-                    goal_results.append({
-                        "run_id": result.run_id,
-                        "goal": goal,
-                        "qaoa_score": result.winning_score,
-                        "classical_score": result.classical_winner_score,
-                        "delta": round((result.winning_score or 0) - (result.classical_winner_score or 0), 4),
-                        "same_winner": (
-                            result.winning_variant and result.classical_winner_variant and
-                            result.winning_variant.variant_id == result.classical_winner_variant.variant_id
-                        ),
-                        "classical_overlap": result.classical_overlap,
-                        "latency_s": round(result.total_latency_s, 2),
-                    })
-                    done += 1
-                results.extend(goal_results)
-            update_batch(batch_id, "complete", results)
-            batch_q.put({"type": "batch_done", "batch_id": batch_id, "results": results})
-        except Exception as exc:
-            update_batch(batch_id, "error", results)
-            batch_q.put({"type": "error", "message": str(exc)})
-            logger.exception("Batch run failed")
-        finally:
-            batch_q.put(None)
-
-    threading.Thread(target=run_batch, daemon=True).start()
+    threading.Thread(
+        target=_run_batch_worker,
+        args=(batch_id, batch_q, total, runs_per_goal),
+        daemon=True,
+    ).start()
     return jsonify({"batch_id": batch_id}), 202
 
 
@@ -313,6 +377,7 @@ def get_batch_result(batch_id: str) -> Response:
     row = get_batch(batch_id)
     if not row:
         return jsonify({"error": "not found"}), 404
+    row.update(get_batch_progress(batch_id))
     return jsonify(row)
 
 
@@ -321,18 +386,58 @@ def get_batch_history() -> Response:
     return jsonify(list_batches())
 
 
+@app.route("/api/batch/<batch_id>/resume", methods=["POST"])
+def resume_batch(batch_id: str) -> Response:
+    row = get_batch(batch_id)
+    if not row:
+        return jsonify({"error": "not found"}), 404
+
+    requeued = requeue_failed_jobs(batch_id, MAX_JOB_ATTEMPTS)
+    runs_per_goal = int(row.get("runs_per_goal", 1))
+    total = len(row.get("goals", [])) * runs_per_goal
+
+    if total == 0:
+        logger.warning("Resume requested for batch %s with total=0 — nothing to do", batch_id)
+        return jsonify({"batch_id": batch_id, "requeued": requeued, "warning": "no jobs to run"}), 200
+
+    # Spawn (or replace) the batch event queue and worker thread.
+    batch_q: queue.Queue = queue.Queue()
+    with _run_queues_lock:
+        _run_queues[f"batch:{batch_id}"] = batch_q
+
+    threading.Thread(
+        target=_run_batch_worker,
+        args=(batch_id, batch_q, total, runs_per_goal),
+        daemon=True,
+    ).start()
+    return jsonify({"batch_id": batch_id, "requeued": requeued}), 202
+
+
+# ---------------------------------------------------------------------------
+# Status
+# ---------------------------------------------------------------------------
+
 @app.route("/api/status")
 def status() -> Response:
     config = get_config()
+    # Cache one probe per unique endpoint — when 7b and 32b point at the same
+    # host (common dev setup) we'd otherwise hit it 4 times for one /status.
+    endpoint_status: dict[str, str] = {}
+
+    def probe(endpoint: str) -> str:
+        if endpoint not in endpoint_status:
+            endpoint_status[endpoint] = _check_ollama(endpoint)
+        return endpoint_status[endpoint]
+
     results: dict = {
-        "prescorer_status": _check_ollama(config.ollama.local_7b_endpoint),
+        "prescorer_status": probe(config.ollama.local_7b_endpoint),
         "prescorer_model": config.ollama.local_7b_model,
-        "deepeval_status": _check_ollama(config.ollama.remote_32b_endpoint),
+        "deepeval_status": probe(config.ollama.remote_32b_endpoint),
         "deepeval_model": config.ollama.remote_32b_model,
         "quantum": "ready",
         # legacy keys — kept for backwards compat
-        "7b_local": _check_ollama(config.ollama.local_7b_endpoint),
-        "32b_remote": _check_ollama(config.ollama.remote_32b_endpoint),
+        "7b_local": probe(config.ollama.local_7b_endpoint),
+        "32b_remote": probe(config.ollama.remote_32b_endpoint),
     }
     return jsonify(results)
 

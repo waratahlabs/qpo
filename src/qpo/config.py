@@ -14,12 +14,12 @@ class OllamaConfig:
         timeout_s: HTTP timeout for model calls
         retry_count: Number of retries on failure
     """
-    local_7b_endpoint: str = "http://localhost:11434"
-    remote_32b_endpoint: str = "http://192.168.1.100:11434"  # M1 Pro on LAN
-    timeout_s: int = 180
+    local_7b_endpoint: str = "http://100.98.87.51:11434"
+    remote_32b_endpoint: str = "http://100.98.87.51:11434"
+    timeout_s: int = 300
     retry_count: int = 3
-    local_7b_model: str = "mistral:7b"
-    remote_32b_model: str = "qwen2.5:32b"
+    local_7b_model: str = "qwen3.5:4b"
+    remote_32b_model: str = "qwen3.6:27b"
 
 
 @dataclass
@@ -32,9 +32,9 @@ class QuantumConfig:
         num_iterations: Max COBYLA optimization iterations
         seed: Random seed for reproducibility
     """
-    backend: str = "lightning"  # Lightning.qubit (CPU sim) for Phase 1
-    circuit_depth: int = 1
-    num_iterations: int = 30
+    backend: str = "lightning"
+    circuit_depth: int = 4
+    num_iterations: int = 50
     seed: int = 42
 
 
@@ -53,7 +53,7 @@ class PipelineConfig:
     min_feature_axes: int = 6
     max_feature_axes: int = 14
     pre_score_timeout_s: int = 900  # 15 minutes per AC-1.3
-    qaoa_prefilter_size: int = 20  # Pre-filter to top-N before QAOA (limits qubit count)
+    qaoa_prefilter_size: int = 28  # Pre-filter to top-N before QAOA (limits qubit count); 28 = ~4 GB VRAM
 
 
 @dataclass
@@ -103,6 +103,10 @@ class Config:
             config.quantum.num_iterations = int(iterations)
         if prefilter := os.getenv("QPO_QAOA_PREFILTER"):
             config.pipeline.qaoa_prefilter_size = int(prefilter)
+        if v := os.getenv("QPO_MAX_CANDIDATES"):
+            config.pipeline.max_candidates = int(v)
+        if v := os.getenv("QPO_QAOA_PREFILTER_SIZE"):
+            config.pipeline.qaoa_prefilter_size = int(v)
 
         # Log level
         if level := os.getenv("QPO_LOG_LEVEL"):

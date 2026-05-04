@@ -16,6 +16,7 @@ import numpy as np
 from qpo.config import get_config
 from qpo.models import Candidate, EvalResult, Intent, PipelineRun, ScoredCandidate
 from qpo.pipeline.candidate_generator import CandidateSpace
+from qpo.pipeline.cooccurrence import build_qubo_matrix, fetch_run_history
 from qpo.pipeline.decomposer import Decomposer
 from qpo.pipeline.deep_evaluator import DeepEvaluator
 from qpo.pipeline.pre_scorer import PreScorer
@@ -43,7 +44,8 @@ class Pipeline:
         quantum_optimizer: Optional[QuantumOptimizer] = None,
         deep_evaluator: Optional[DeepEvaluator] = None,
         max_candidates: int = 512,
-        qaoa_prefilter_size: int = 20,
+        qaoa_prefilter_size: int = 28,
+        history_endpoint: str = "",
     ) -> None:
         """Initialize pipeline with components.
 
@@ -55,6 +57,7 @@ class Pipeline:
             deep_evaluator: Deep evaluation model (default: new DeepEvaluator)
             max_candidates: Cap on candidate space (default 512)
             qaoa_prefilter_size: Top-N pre-scored candidates to pass to QAOA (limits qubits)
+            history_endpoint: QPO server URL for fetching run history (off-diagonal QUBO)
         """
         cfg = get_config()
         ep = cfg.ollama.local_7b_endpoint
@@ -69,11 +72,14 @@ class Pipeline:
         self.deep_evaluator = deep_evaluator or DeepEvaluator(ollama_endpoint=ep32, model=m32b, timeout_s=t)
         self.max_candidates = max_candidates or cfg.pipeline.max_candidates
         self.qaoa_prefilter_size = qaoa_prefilter_size or cfg.pipeline.qaoa_prefilter_size
+        # QPO server is always localhost — the Ollama host is a separate machine.
+        self.history_endpoint = history_endpoint or "http://localhost:5001"
 
     def run(
         self,
         intent: Intent,
         on_event: Optional[Callable[[dict], None]] = None,
+        run_id: Optional[str] = None,
     ) -> PipelineRun:
         """Execute full pipeline end-to-end.
 
@@ -92,7 +98,7 @@ class Pipeline:
             if on_event:
                 on_event(event)
 
-        run_id = str(uuid.uuid4())
+        run_id = run_id or str(uuid.uuid4())
         start_time = time.time()
 
         def ts() -> str:
@@ -169,17 +175,20 @@ class Pipeline:
         emit({"type": "log", "time": ts(), "level": "info",
               "message": f"Pre-filtered to top {len(prefiltered)} candidates for QAOA"})
 
-        # Wrap on_event to intercept QAOA iteration metrics
-        qaoa_iteration = [0]
-
-        def qaoa_aware_optimizer_run(qm, cids, ss):
-            result = self.quantum_optimizer.qubo_to_shortlist(qm, cids, ss)
-            return result
-
-        # Build QUBO diagonal from actual pre-scores
-        qubo_diag = np.array([sc.pre_score for sc in prefiltered])
-        qubo_matrix = np.diag(qubo_diag)
+        # Build QUBO matrix: diagonal pre-scores + off-diagonal co-occurrence terms
+        qubo_diag = [sc.pre_score for sc in prefiltered]
         candidate_ids = [sc.candidate.variant_id for sc in prefiltered]
+        candidate_feature_vecs = [sc.candidate.feature_values for sc in prefiltered]
+        try:
+            run_history = fetch_run_history(self.history_endpoint)
+        except Exception as exc:
+            logger.warning("Could not fetch run history for co-occurrence (%s) — diagonal QUBO only", exc)
+            run_history = []
+        qubo_matrix = build_qubo_matrix(
+            qubo_diag,
+            candidate_feature_vecs,
+            run_history,
+        )
 
         # Patch logger temporarily to intercept QAOA iteration logs
         class _QAOALogHandler(logging.Handler):
@@ -250,12 +259,24 @@ class Pipeline:
               "message": f"Deep-evaluated {len(eval_results)} candidates ({overlap} shared between QAOA and classical)"})
 
         # Find QAOA winner
+        if not qaoa_evals:
+            raise ValueError(
+                "Deep evaluator returned no scores for QAOA shortlist — cannot pick a winner"
+            )
         best_result = max(qaoa_evals, key=lambda er: er.score)
         winning_variant = best_result.candidate
         winning_score = best_result.score
 
-        # Find classical winner
-        classical_best = max(classical_evals, key=lambda er: er.score)
+        # Find classical winner — fall back to QAOA winner if classical eval set is empty
+        # (can happen when deep evaluator drops candidates and classical_ids is a subset).
+        if classical_evals:
+            classical_best = max(classical_evals, key=lambda er: er.score)
+        else:
+            logger.warning(
+                "[%s] No classical evals returned — using QAOA winner as classical placeholder",
+                run_id,
+            )
+            classical_best = best_result
 
         total_latency = time.time() - start_time
         logger.info(
@@ -283,6 +304,11 @@ class Pipeline:
                 "shortlist_size": len(quantum_shortlist),
                 "prescorer_model": self.pre_scorer.model,
                 "deepeval_model": self.deep_evaluator.model,
+                "qaoa_status": (
+                    "fallback"
+                    if getattr(self.quantum_optimizer, "last_run_used_fallback", False)
+                    else "ok"
+                ),
             },
         )
         emit({

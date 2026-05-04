@@ -49,7 +49,7 @@ QAOA advantage concentrates in tasks with open-ended answer spaces (git commit: 
 
 ## Hardware
 
-- **Quantum simulation:** Predator (Intel U9-275HX, RTX 5070Ti Mobile 12GB VRAM) — PennyLane `lightning.gpu` via WSL2, accessible over Tailscale
+- **Quantum simulation:** Predator (Intel U9-275HX, RTX 5070Ti Mobile 12GB VRAM) — PennyLane `lightning.gpu` via WSL2
 - **Pre-scorer:** Mac (M1 Pro) — `granite4.1:3b` via Ollama
 - **Deep evaluator:** Mac (M1 Pro) — `granite4.1:8b` via Ollama
 

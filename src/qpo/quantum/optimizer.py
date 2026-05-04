@@ -36,6 +36,10 @@ class QuantumOptimizer:
         self.circuit_depth = circuit_depth
         self.num_iterations = num_iterations
         self.seed = seed
+        # Set after every qubo_to_shortlist call. True iff QAOA raised and we
+        # fell back to greedy diagonal ranking. Pipeline reads this and records
+        # it in PipelineRun.metadata["qaoa_status"].
+        self.last_run_used_fallback: bool = False
 
     def qubo_to_shortlist(
         self,
@@ -59,6 +63,9 @@ class QuantumOptimizer:
                 f"QUBO matrix size {qubo_matrix.shape[0]} != candidate_ids length {n}"
             )
 
+        # Reset before each call. _qaoa_lightning sets True on fallback.
+        self.last_run_used_fallback = False
+
         if self.backend == "stub":
             return random.sample(list(candidate_ids), min(shortlist_size, n))
 
@@ -73,27 +80,61 @@ class QuantumOptimizer:
         candidate_ids: list[str],
         shortlist_size: int,
     ) -> list[str]:
+        try:
+            return self._qaoa_lightning_inner(qubo_matrix, candidate_ids, shortlist_size)
+        except Exception as exc:
+            logger.error(
+                "QAOA circuit failed (%s: %s) — falling back to greedy pre-score ranking",
+                type(exc).__name__, exc,
+            )
+            self.last_run_used_fallback = True
+            scores = np.diag(qubo_matrix).tolist()
+            ranked = sorted(range(len(candidate_ids)), key=lambda i: -scores[i])
+            return [candidate_ids[i] for i in ranked[:shortlist_size]]
+
+    def _qaoa_lightning_inner(
+        self,
+        qubo_matrix: np.ndarray,
+        candidate_ids: list[str],
+        shortlist_size: int,
+    ) -> list[str]:
         import pennylane as qml
 
         n_qubits = len(candidate_ids)
         scores = np.diag(qubo_matrix).tolist()
 
+        # Off-diagonal interaction terms: Q_ij for i < j
+        cross_pairs = [
+            (i, j, float(qubo_matrix[i, j]))
+            for i in range(n_qubits)
+            for j in range(i + 1, n_qubits)
+            if abs(qubo_matrix[i, j]) > 1e-6
+        ]
+
         dev = self._select_device(n_qubits)
-        logger.info("QAOA: %d qubits, depth=%d, device=%s", n_qubits, self.circuit_depth, dev)
+        logger.info(
+            "QAOA: %d qubits, depth=%d, %d cross-terms, device=%s",
+            n_qubits, self.circuit_depth, len(cross_pairs), dev,
+        )
+
+        def _build_hamiltonian() -> "qml.Hamiltonian":
+            coeffs = [-scores[i] for i in range(n_qubits)]
+            ops = [qml.PauliZ(i) for i in range(n_qubits)]
+            for i, j, q_ij in cross_pairs:
+                coeffs.append(-q_ij)
+                ops.append(qml.PauliZ(i) @ qml.PauliZ(j))
+            return qml.Hamiltonian(coeffs, ops)
+
+        H = _build_hamiltonian()
 
         @qml.qnode(dev)
         def cost_circuit(params: np.ndarray) -> float:
-            _apply_qaoa_layers(params, scores, n_qubits, self.circuit_depth)
-            # Cost Hamiltonian expectation: Σ_i -score_i * <Z_i>
-            H = qml.Hamiltonian(
-                [-scores[i] for i in range(n_qubits)],
-                [qml.PauliZ(i) for i in range(n_qubits)],
-            )
+            _apply_qaoa_layers(params, scores, cross_pairs, n_qubits, self.circuit_depth)
             return qml.expval(H)
 
         @qml.qnode(dev)
         def marginal_circuit(params: np.ndarray) -> list:
-            _apply_qaoa_layers(params, scores, n_qubits, self.circuit_depth)
+            _apply_qaoa_layers(params, scores, cross_pairs, n_qubits, self.circuit_depth)
             return [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
 
         rng = np.random.default_rng(self.seed)
@@ -103,7 +144,7 @@ class QuantumOptimizer:
 
         def callback(params: np.ndarray) -> None:
             cost = float(cost_circuit(params))
-            logger.debug("QAOA iteration %d: cost=%.6f", iteration_count[0], cost)
+            logger.info("QAOA iteration %d: cost=%.6f", iteration_count[0], cost)
             iteration_count[0] += 1
 
         result = minimize(
@@ -123,7 +164,6 @@ class QuantumOptimizer:
         z_exps = marginal_circuit(result.x)
         qubit_probs = [(1.0 - float(z)) / 2.0 for z in z_exps]
 
-        # Return top-K candidates by marginal selection probability
         ranked = sorted(range(n_qubits), key=lambda i: -qubit_probs[i])
         return [candidate_ids[i] for i in ranked[:shortlist_size]]
 
@@ -150,6 +190,7 @@ class QuantumOptimizer:
 def _apply_qaoa_layers(
     params: np.ndarray,
     scores: list[float],
+    cross_pairs: list[tuple[int, int, float]],
     n_qubits: int,
     circuit_depth: int,
 ) -> None:
@@ -169,12 +210,14 @@ def _apply_qaoa_layers(
         gamma = params[2 * layer]
         beta = params[2 * layer + 1]
 
-        # Cost unitary: exp(-i γ H_C) where H_C = -Σ score_i Z_i
-        # RZ(θ)|ψ⟩ = exp(-i θ/2 Z)|ψ⟩  →  θ = 2γ score_i
+        # Diagonal cost terms: exp(-i γ score_i Z_i)
         for i in range(n_qubits):
             qml.RZ(2.0 * gamma * scores[i], wires=i)
 
+        # Off-diagonal ZZ interaction terms: exp(-i γ Q_ij Z_i Z_j)
+        for i, j, q_ij in cross_pairs:
+            qml.IsingZZ(2.0 * gamma * q_ij, wires=[i, j])
+
         # Mixer unitary: exp(-i β H_M) where H_M = Σ X_i
-        # RX(θ)|ψ⟩ = exp(-i θ/2 X)|ψ⟩  →  θ = 2β
         for i in range(n_qubits):
             qml.RX(2.0 * beta, wires=i)

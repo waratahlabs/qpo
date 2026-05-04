@@ -2,21 +2,39 @@
 
 import json
 import sqlite3
+import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
 _DB_PATH = Path("qpo_runs.db")
+_DB_PATH_LOCK = threading.Lock()
+_DB_INITIALISED = False
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(_DB_PATH))
+    with _DB_PATH_LOCK:
+        path = _DB_PATH
+    conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def init_db(db_path: Path = _DB_PATH) -> None:
-    global _DB_PATH
-    _DB_PATH = db_path
+    """Initialise the schema at db_path.
+
+    Thread-safe: the global path mutation is guarded by a lock. If init_db has
+    already been called with a different path, raises RuntimeError — re-init
+    to a different DB inside one process is a programming error.
+    """
+    global _DB_PATH, _DB_INITIALISED
+    with _DB_PATH_LOCK:
+        if _DB_INITIALISED and Path(_DB_PATH) != Path(db_path):
+            raise RuntimeError(
+                f"init_db already initialised at {_DB_PATH}; refusing to switch to {db_path}"
+            )
+        _DB_PATH = db_path
+        _DB_INITIALISED = True
     with _connect() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS runs (
@@ -40,6 +58,28 @@ def init_db(db_path: Path = _DB_PATH) -> None:
                 created_at  TEXT DEFAULT (datetime('now'))
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS jobs (
+                job_id      TEXT PRIMARY KEY,
+                batch_id    TEXT NOT NULL,
+                goal        TEXT NOT NULL,
+                rep         INTEGER NOT NULL,
+                backend     TEXT NOT NULL,
+                status      TEXT NOT NULL DEFAULT 'pending',
+                -- attempts = number of times this job has been claimed
+                -- (incremented in claim_next_job), NOT the number of times it
+                -- has failed. A job that succeeds on its first claim has attempts=1.
+                attempts    INTEGER NOT NULL DEFAULT 0,
+                result_json TEXT,
+                error       TEXT,
+                created_at  TEXT DEFAULT (datetime('now')),
+                updated_at  TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_batch_status "
+            "ON jobs (batch_id, status)"
+        )
 
 
 def save_run(
@@ -74,14 +114,29 @@ def get_run(run_id: str) -> dict[str, Any] | None:
     return d
 
 
-def list_runs(limit: int = 50) -> list[dict[str, Any]]:
+def list_runs(limit: int = 500, full: bool = False) -> list[dict[str, Any]]:
+    """List recent runs. When full=False, the result_json blob is omitted from
+    the SELECT entirely — no wasted I/O on payloads we discard."""
     with _connect() as conn:
-        rows = conn.execute(
-            "SELECT run_id, goal, backend, score, latency_s, created_at "
-            "FROM runs ORDER BY created_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-    return [dict(r) for r in rows]
+        if full:
+            rows = conn.execute(
+                "SELECT run_id, goal, backend, score, latency_s, created_at, result_json "
+                "FROM runs ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT run_id, goal, backend, score, latency_s, created_at "
+                "FROM runs ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    results = []
+    for row in rows:
+        d = dict(row)
+        if full and d.get("result_json"):
+            d["result"] = json.loads(d.pop("result_json"))
+        results.append(d)
+    return results
 
 
 def save_batch(batch_id: str, goals: list[str], backend: str, runs_per_goal: int) -> None:
@@ -127,4 +182,135 @@ def list_batches(limit: int = 20) -> list[dict[str, Any]]:
         d = dict(r)
         d["goals"] = json.loads(d.pop("goals_json"))
         out.append(d)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Job queue (per-batch pull-model work units)
+# ---------------------------------------------------------------------------
+
+
+def create_jobs(
+    batch_id: str,
+    goals: list[str],
+    backend: str,
+    runs_per_goal: int,
+) -> list[str]:
+    """Insert one job per (goal, rep) for the batch. Returns the job_ids in
+    insertion order."""
+    job_ids: list[str] = []
+    rows: list[tuple[str, str, str, int, str]] = []
+    for goal in goals:
+        for rep in range(runs_per_goal):
+            jid = str(uuid.uuid4())
+            job_ids.append(jid)
+            rows.append((jid, batch_id, goal, rep, backend))
+    with _connect() as conn:
+        conn.executemany(
+            "INSERT INTO jobs (job_id, batch_id, goal, rep, backend) "
+            "VALUES (?, ?, ?, ?, ?)",
+            rows,
+        )
+    return job_ids
+
+
+def claim_next_job(batch_id: str) -> dict[str, Any] | None:
+    """Atomically claim one pending job for the batch. Returns None if none
+    pending. SQLite single-writer semantics make the UPDATE atomic; the
+    nested SELECT picks an arbitrary pending job_id which we then mark
+    running and return."""
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            UPDATE jobs
+               SET status='running',
+                   attempts=attempts+1,
+                   updated_at=datetime('now')
+             WHERE job_id = (
+                 SELECT job_id FROM jobs
+                  WHERE batch_id=? AND status='pending'
+                  LIMIT 1
+             )
+            RETURNING job_id, batch_id, goal, rep, backend, status, attempts
+            """,
+            (batch_id,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    return dict(row)
+
+
+def complete_job(job_id: str, result: dict[str, Any]) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE jobs
+               SET status='complete',
+                   result_json=?,
+                   error=NULL,
+                   updated_at=datetime('now')
+             WHERE job_id=?
+            """,
+            (json.dumps(result), job_id),
+        )
+
+
+def fail_job(job_id: str, error: str) -> None:
+    """Mark a job failed. Note: attempts is incremented on claim, so we do
+    not double-count here — we just record the error and flip status."""
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE jobs
+               SET status='failed',
+                   error=?,
+                   updated_at=datetime('now')
+             WHERE job_id=?
+            """,
+            (error, job_id),
+        )
+
+
+def requeue_failed_jobs(batch_id: str, max_attempts: int = 3) -> int:
+    """Move failed jobs with attempts < max_attempts back to pending.
+    Returns count requeued."""
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            UPDATE jobs
+               SET status='pending',
+                   updated_at=datetime('now')
+             WHERE batch_id=?
+               AND status='failed'
+               AND attempts < ?
+            """,
+            (batch_id, max_attempts),
+        )
+        return cur.rowcount or 0
+
+
+def get_batch_jobs(batch_id: str) -> list[dict[str, Any]]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM jobs WHERE batch_id=? ORDER BY created_at ASC",
+            (batch_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_batch_progress(batch_id: str) -> dict[str, int]:
+    """Return per-status counts for the batch. Always includes all keys."""
+    out = {"total": 0, "pending": 0, "running": 0, "complete": 0, "failed": 0}
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) AS n FROM jobs WHERE batch_id=? GROUP BY status",
+            (batch_id,),
+        ).fetchall()
+    for r in rows:
+        status = r["status"]
+        n = int(r["n"])
+        out["total"] += n
+        if status in out:
+            out[status] = n
     return out
