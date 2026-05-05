@@ -1,0 +1,69 @@
+{
+  "description": "EX-005 Batch 3/3: structured_output goals (SO-1..5, shallow+deep). 10 goals x 10 reps = 100 runs. Tests HY-011 (QAOA expected to underperform classical on structured output) and HY-012 (deep prompt depth effect). Run last, after reviewing batch 1+2.",
+  "experiment_id": "EX-005-SO",
+  "hypotheses": ["HY-011", "HY-012"],
+  "backend": "lightning",
+  "runs_per_goal": 10,
+  "goals": [
+    {
+      "id": "SO-1-shallow",
+      "goal": "Write a Python function docstring for a function that takes a QUBO matrix and candidate IDs and returns a ranked shortlist",
+      "problem_type": "structured_output",
+      "depth": "shallow"
+    },
+    {
+      "id": "SO-1-deep",
+      "goal": "Write a complete Google-style docstring for the following Python method signature: `def qubo_to_shortlist(self, qubo_matrix: np.ndarray, candidate_ids: list[str], shortlist_size: int = 10) -> list[str]`. The method belongs to a `QuantumOptimizer` class. It accepts a symmetric 2D numpy array representing the QUBO cost matrix, a list of string identifiers (one per row/column), and an optional shortlist size, and returns the identifiers of the top candidates selected by QAOA optimisation. The docstring must conform exactly to Google docstring format and include: a one-line summary (imperative mood, under 72 characters), an extended description paragraph explaining the QAOA optimisation process, an Args section with type annotation, shape constraint (NxN for qubo_matrix), and description for each parameter, a Returns section with type and description, a Raises section covering `ValueError` for non-square matrix or mismatched candidate_ids length, and `RuntimeError` if COBYLA fails to converge in the configured iteration limit, and an Example block using `>>>` doctest syntax with a 3x3 example. Do not include type annotations in the docstring Args — they are already in the signature.",
+      "problem_type": "structured_output",
+      "depth": "deep"
+    },
+    {
+      "id": "SO-2-shallow",
+      "goal": "Write a GitHub Actions workflow YAML that runs pytest, ruff, and builds a Docker image on push to main",
+      "problem_type": "structured_output",
+      "depth": "shallow"
+    },
+    {
+      "id": "SO-2-deep",
+      "goal": "Write a complete GitHub Actions workflow YAML file for a Python monorepo. Requirements: trigger on push to `main` and on pull_request targeting `main`; run on `ubuntu-22.04`; use Python 3.11; install dependencies with `pip install -e '.[dev]'`; run `ruff check .` for linting (fail on any error); run `pytest tests/ --cov=src --cov-report=xml` for tests; enforce minimum 80% coverage using `--cov-fail-under=80`; build a Docker image tagged with both `latest` and the 8-character git SHA using a `./Dockerfile`; push the image to GitHub Container Registry (`ghcr.io`) only on push to `main` (not on PRs); use `docker/login-action@v3` for registry authentication with `GITHUB_TOKEN`; name the workflow `CI`. Use only the necessary YAML keys. Do not add comments. Job names must be `lint`, `test`, and `build`. The `build` job must depend on both `lint` and `test`.",
+      "problem_type": "structured_output",
+      "depth": "deep"
+    },
+    {
+      "id": "SO-3-shallow",
+      "goal": "Write an OpenAPI 3.0 path entry for a POST endpoint that accepts a list of optimisation goals and returns a batch ID",
+      "problem_type": "structured_output",
+      "depth": "shallow"
+    },
+    {
+      "id": "SO-3-deep",
+      "goal": "Write a complete OpenAPI 3.0 YAML fragment covering the path definition and all referenced component schemas for the `POST /api/batch` endpoint of a quantum prompt optimisation service. The request body (required) must include: `goals` (required array of strings, minItems 1, maxItems 100, each item minLength 1), `backend` (optional string enum of `stub`, `lightning`, `braket-sim`, `braket-qpu`, default `stub`), `runs_per_goal` (optional integer, minimum 1, maximum 10, default 1). Successful response: 202 with body containing `batch_id` (string, format uuid). Error response: 400 with body containing `error` (string). Include the full `components/schemas` definitions for `BatchRequest`, `BatchResponse`, and `ErrorResponse`. All schemas must use `additionalProperties: false`. Use YAML format. Do not include the `openapi`, `info`, or `servers` keys — only `paths` and `components`.",
+      "problem_type": "structured_output",
+      "depth": "deep"
+    },
+    {
+      "id": "SO-4-shallow",
+      "goal": "Write Python type annotations for a method that accepts a QUBO cost matrix and returns either a list of IDs or a list of scored tuples depending on a flag",
+      "problem_type": "structured_output",
+      "depth": "shallow"
+    },
+    {
+      "id": "SO-4-deep",
+      "goal": "Write the complete Python type annotation stubs using `typing.overload` for a method `qubo_to_shortlist` on a class `QuantumOptimizer`. The method has two call signatures: (1) when `return_scores=False` (the default), it accepts `qubo_matrix: np.ndarray`, `candidate_ids: list[str]`, `shortlist_size: int = 10`, `return_scores: Literal[False] = False` and returns `list[str]`; (2) when `return_scores=True`, it accepts the same first three parameters, `return_scores: Literal[True]`, and returns `list[tuple[str, float]]`. Write the two `@overload` decorated stubs and the actual implementation signature (which must use a `Union` return type). All annotations must be compatible with Python 3.11, pass `mypy --strict`, and import only from `typing`, `typing_extensions` (if needed), and `numpy`. Do not write the method body — only the overload stubs and the implementation signature line. Include all necessary imports.",
+      "problem_type": "structured_output",
+      "depth": "deep"
+    },
+    {
+      "id": "SO-5-shallow",
+      "goal": "Write a JSON Schema for a pipeline log entry with timestamp, run_id, level, stage, and message fields",
+      "problem_type": "structured_output",
+      "depth": "shallow"
+    },
+    {
+      "id": "SO-5-deep",
+      "goal": "Write a complete JSON Schema (draft-07) document that validates structured log entries emitted by a quantum pipeline service. Each log entry must have: `timestamp` (string, format date-time, ISO 8601), `run_id` (string, format uuid), `level` (string, enum of exactly `debug`, `info`, `warning`, `error`, `critical` — lowercase only), `stage` (integer, minimum 1, maximum 5), `message` (string, minLength 1, maxLength 1000), and an optional `metrics` object where all property values must be numbers (`additionalProperties: {type: number}`). Constraints: `additionalProperties` must be false at the root level. When `level` is `error` or `critical`, `stage` must be required (use `if`/`then` with an `anyOf` on the two level values). The schema must be self-contained with a `$schema` key and a `title`. Write valid JSON.",
+      "problem_type": "structured_output",
+      "depth": "deep"
+    }
+  ]
+}

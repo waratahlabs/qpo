@@ -1,0 +1,69 @@
+{
+  "description": "EX-005 Batch 1/3: open_compositional goals (OC-1..5, shallow+deep). 10 goals x 10 reps = 100 runs. Tests HY-011 (QAOA advantage on open compositional tasks) and HY-012 (deep prompts generate more feature axes). Run first, review before batch 2.",
+  "experiment_id": "EX-005-OC",
+  "hypotheses": ["HY-011", "HY-012"],
+  "backend": "lightning",
+  "runs_per_goal": 10,
+  "goals": [
+    {
+      "id": "OC-1-shallow",
+      "goal": "Write a git commit message for a refactor that splits a monolithic auth module into three composable middlewares",
+      "problem_type": "open_compositional",
+      "depth": "shallow"
+    },
+    {
+      "id": "OC-1-deep",
+      "goal": "You are a senior engineer writing a git commit message for a substantial refactor that splits a 900-line monolithic authentication module into three independently-composable middlewares: session validation, token refresh, and role extraction. The commit will be read by an engineering team of 12 and must survive as a searchable git history entry for at least five years. Write the complete commit message — subject line and body — following the Conventional Commits specification. The subject must be under 72 characters. The body must describe what changed, why the split was made, and the migration path for callers. Avoid passive voice. Do not use the words 'simply' or 'just'.",
+      "problem_type": "open_compositional",
+      "depth": "deep"
+    },
+    {
+      "id": "OC-2-shallow",
+      "goal": "Draft a cold outreach email introducing a new identity verification library to a potential enterprise customer",
+      "problem_type": "open_compositional",
+      "depth": "shallow"
+    },
+    {
+      "id": "OC-2-deep",
+      "goal": "You are the founder of a small software company reaching out to the head of engineering at a mid-size Australian fintech. You are introducing Sigil — a Bluetooth Low Energy device-presence verification library that replaces SMS OTP for in-person KYC workflows. The recipient is technically literate but time-constrained. Your email must: open with a concrete pain point their team already feels (SMS OTP abandonment rates at branch counters run 15-25%), explain what Sigil does and how it works in exactly two sentences, demonstrate you understand their compliance context (eIDAS 2.0, Australian Privacy Act), and close with a single low-friction next step that takes them under two minutes to complete. Subject line included. Under 200 words. No bullet points.",
+      "problem_type": "open_compositional",
+      "depth": "deep"
+    },
+    {
+      "id": "OC-3-shallow",
+      "goal": "Translate this informal Slack message into a formal engineering RFC opening paragraph: 'hey team I think we should stop using our homebrew session tokens and move to JWTs — the mobile app would be way easier and we can use existing libraries. also our tokens are like 20 chars which is probably not enough entropy right?'",
+      "problem_type": "open_compositional",
+      "depth": "shallow"
+    },
+    {
+      "id": "OC-3-deep",
+      "goal": "You are a staff engineer translating an informal Slack discussion into a formal RFC. The thread reads: 'hey team I think we should stop using our homebrew session tokens and move to JWTs — the mobile app would be WAY easier and we can use existing libraries. also our tokens are like 20 chars which is probably not enough entropy right? @alice said the auth service rewrite is coming up anyway'. Write the opening section of the RFC, covering: a one-sentence problem statement, a motivation paragraph that names the concrete security and developer-experience costs of the current approach (quantify entropy weakness in bits), the proposed solution in one paragraph, and a two-sentence scope boundary that states explicitly what is and is not in scope. Use formal prose. Do not use hedging language ('might', 'could consider', 'perhaps'). The RFC will be reviewed by a security-focused CISO.",
+      "problem_type": "open_compositional",
+      "depth": "deep"
+    },
+    {
+      "id": "OC-4-shallow",
+      "goal": "Write a technical blog post introduction explaining how QUBO maps prompt feature selection to a binary optimisation problem",
+      "problem_type": "open_compositional",
+      "depth": "shallow"
+    },
+    {
+      "id": "OC-4-deep",
+      "goal": "Write the opening section of a technical blog post for the Waratah Labs engineering blog. Audience: ML engineers who are fluent in transformers and attention mechanisms but have no quantum computing background. The post explains how selecting which prompt features to include — tone, examples, constraints, role assignment, length directive — can be modelled as a Quadratic Unconstrained Binary Optimisation problem, and why that framing makes the problem tractable for quantum-approximate solvers. Structure: paragraph 1 must hook the reader with an everyday analogy that doesn't require ML knowledge. Paragraph 2 must introduce QUBO without algebraic notation, using a two-variable worked example. Paragraph 3 must bridge to prompt engineering specifically: name the prompt features as variables and explain why the quadratic terms (co-occurrence weights) matter. End the section with a one-sentence transition to the next section. No emojis. No hype. Concrete over abstract.",
+      "problem_type": "open_compositional",
+      "depth": "deep"
+    },
+    {
+      "id": "OC-5-shallow",
+      "goal": "Write a pitch paragraph for a hardware-first privacy tool to a non-technical government procurement officer",
+      "problem_type": "open_compositional",
+      "depth": "shallow"
+    },
+    {
+      "id": "OC-5-deep",
+      "goal": "You are pitching Argus — an on-device AI assistant that processes sensitive government data entirely on a local hardware enclave, with zero cloud dependency — to a non-technical procurement officer at a mid-size federal agency. The officer's primary concerns are: data sovereignty, auditability under the PSPF, and avoiding vendor lock-in from cloud AI providers. Write a single pitch paragraph of 120-150 words. The paragraph must: open with the procurement officer's problem (not your product), explain the hardware-first approach in plain language without using the words 'AI', 'machine learning', or 'model', name the specific compliance benefit (PSPF Protective Security Policy, ISM controls 0714 and 1145), and close with a single confident statement of differentiation from cloud alternatives. Avoid passive voice. No bullet points. No acronyms without expansion.",
+      "problem_type": "open_compositional",
+      "depth": "deep"
+    }
+  ]
+}

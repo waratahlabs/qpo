@@ -108,3 +108,9 @@ dmypy.json
 # Pyre type checker
 .pyre/*.db
 .env.*
+
+# QPO runtime artifacts
+qpo_runs.db
+paper/
+results/
+ISA.md

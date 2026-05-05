@@ -1,0 +1,69 @@
+{
+  "description": "EX-005 Batch 2/3: analytical goals (AN-1..5, shallow+deep). 10 goals x 10 reps = 100 runs. Tests HY-011 (QAOA advantage on open compositional vs analytical) and HY-012 (deep prompt depth effect). Run after reviewing batch 1 results.",
+  "experiment_id": "EX-005-AN",
+  "hypotheses": ["HY-011", "HY-012"],
+  "backend": "lightning",
+  "runs_per_goal": 10,
+  "goals": [
+    {
+      "id": "AN-1-shallow",
+      "goal": "Analyse this code diff and flag any security issues: a new Flask endpoint accepts a 'filename' parameter and serves os.path.join('/data/exports', filename) with no authentication",
+      "problem_type": "analytical",
+      "depth": "shallow"
+    },
+    {
+      "id": "AN-1-deep",
+      "goal": "You are a senior security engineer performing a formal code review on a Python pull request. The diff introduces a new Flask endpoint: `@app.route('/api/export') def export(): filename = request.args.get('filename', ''); path = os.path.join('/data/exports', filename); return send_file(path)`. The endpoint has no authentication decorator. The service runs behind an internal nginx proxy but is reachable from all employees on the corporate VPN. Perform a complete security analysis. For each vulnerability: (1) name it using CWE identifier and OWASP Top 10 category, (2) describe the specific exploit path an attacker on the VPN could take, (3) assign CVSS v3.1 severity (Critical/High/Medium/Low), (4) write a one-sentence remediation. List issues in descending severity. Be exhaustive — assume the reviewer will file tickets against every item you surface.",
+      "problem_type": "analytical",
+      "depth": "deep"
+    },
+    {
+      "id": "AN-2-shallow",
+      "goal": "Explain the trade-offs between using a diagonal QUBO versus adding off-diagonal cross-terms for combinatorial optimisation to a senior ML engineer",
+      "problem_type": "analytical",
+      "depth": "shallow"
+    },
+    {
+      "id": "AN-2-deep",
+      "goal": "Write a structured technical comparison for a senior ML engineer who has strong background in classical optimisation (gradient descent, branch-and-bound, simulated annealing) but no prior quantum computing knowledge. Compare diagonal QUBO formulation against full off-diagonal QUBO with ZZ cross-terms on five axes: (1) expressivity of the cost landscape, (2) circuit depth scaling with problem size, (3) classical preprocessing cost to compute co-occurrence weights, (4) susceptibility to barren plateaus in COBYLA optimisation, and (5) when greedy classical selection is provably optimal for each. For each axis, give a concrete statement of how each formulation behaves and name the regime where each is preferable. Include a final recommendation paragraph for a team evaluating which QUBO variant to use for a 20-30 variable binary feature selection problem running on a simulator with 24 qubits.",
+      "problem_type": "analytical",
+      "depth": "deep"
+    },
+    {
+      "id": "AN-3-shallow",
+      "goal": "Identify the root cause and three action items for this incident: a mobile banking app was down for 47 minutes after a dependency version bump (requests 2.28 to 2.32) broke session serialisation in production",
+      "problem_type": "analytical",
+      "depth": "shallow"
+    },
+    {
+      "id": "AN-3-deep",
+      "goal": "You are an SRE writing a blameless incident postmortem for distribution to engineering leadership and the on-call rotation. Incident details: a mobile banking app serving approximately 15,000 daily active users experienced a 47-minute complete login outage on a Tuesday morning at 09:14 AEST. The outage began when a routine CI/CD deployment bumped `requests` from 2.28 to 2.32. The version change triggered a breaking change in the session serialisation layer (pickle protocol version mismatch with a cached session format). The on-call engineer identified the deployment as the trigger and rolled back after 47 minutes. There was no staging environment integration test covering this code path. The version bump was not reviewed by a second engineer. Write: (1) a two-sentence executive summary, (2) a timeline with five entries using UTC timestamps, (3) a root cause analysis using the 5 Whys structure (write out each Why/Because pair), (4) three corrective action items each with an owner role, acceptance criterion, and due-in weeks.",
+      "problem_type": "analytical",
+      "depth": "deep"
+    },
+    {
+      "id": "AN-4-shallow",
+      "goal": "Evaluate whether a Python project should replace the requests library with httpx given that existing tests use requests-mock",
+      "problem_type": "analytical",
+      "depth": "shallow"
+    },
+    {
+      "id": "AN-4-deep",
+      "goal": "You are a principal engineer evaluating a library migration proposal for a production Python service with approximately 40,000 lines of code. The proposal is to replace the `requests` library with `httpx` to gain native async/await support and HTTP/2 multiplexing. Context: the service is I/O-bound; bottleneck analysis shows 60% of request latency comes from sequential HTTP calls to a third-party API that supports HTTP/2. The codebase has 180 unit tests that mock `requests` using `requests-mock`. The team consists of 3 senior and 2 junior engineers; none have shipped async Python in production before. Evaluate the migration on five axes: (1) expected latency improvement from HTTP/2 multiplexing (quantify if possible), (2) migration effort in engineer-weeks including test rewrites, (3) risk surface (name three specific failure modes), (4) test strategy after migration, (5) team capability gap and how to close it. Conclude with a go/no-go recommendation and a single sentence of justification. No hedging.",
+      "problem_type": "analytical",
+      "depth": "deep"
+    },
+    {
+      "id": "AN-5-shallow",
+      "goal": "Identify the failure modes when a Kafka consumer group falls 90 minutes behind producers during peak load",
+      "problem_type": "analytical",
+      "depth": "shallow"
+    },
+    {
+      "id": "AN-5-deep",
+      "goal": "You are a distributed systems engineer reviewing a Kafka-based event pipeline. Architecture: three consumer groups process the same topic. Producer throughput: 50,000 events/minute. Consumer group A (order processing, 6 partitions, 6 consumers): lagging 90 minutes behind during Tuesday morning peak. Consumer group B (analytics, indefinite retention): processing at 30% of producer throughput and falling further behind each day. Consumer group C (push notifications, 6 partitions, 6 consumers): caught up, no lag. Perform a structured failure mode analysis. For consumer group A and B separately: identify the primary failure mode, describe the trigger condition in terms of observable metrics, describe the business impact if not resolved, and propose a mitigation with an estimated implementation effort. Then identify two cross-cutting architectural risks that affect both groups. For each risk: name it, describe the blast radius, and propose a structural fix. Finish with a prioritised remediation sequence (most urgent first).",
+      "problem_type": "analytical",
+      "depth": "deep"
+    }
+  ]
+}

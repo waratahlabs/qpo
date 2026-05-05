@@ -1,0 +1,189 @@
+{
+  "description": "EX-005: 2x3 factorial experiment — problem type (open_compositional / analytical / structured_output) x prompt depth (shallow / deep). 15 base prompts x 2 depth variants = 30 goals. 10 reps each = 300 runs at 24q depth 4. Tests HY-011 (QAOA advantage concentrates on open compositional) and HY-012 (deep prompts generate more feature axes, higher QAOA win rate).",
+  "experiment_id": "EX-005",
+  "hypotheses": ["HY-011", "HY-012"],
+  "backend": "lightning",
+  "runs_per_goal": 10,
+  "goals": [
+    {
+      "id": "OC-1-shallow",
+      "goal": "Write a git commit message for a refactor that splits a monolithic auth module into three composable middlewares",
+      "problem_type": "open_compositional",
+      "depth": "shallow"
+    },
+    {
+      "id": "OC-1-deep",
+      "goal": "You are a senior engineer writing a git commit message for a substantial refactor that splits a 900-line monolithic authentication module into three independently-composable middlewares: session validation, token refresh, and role extraction. The commit will be read by an engineering team of 12 and must survive as a searchable git history entry for at least five years. Write the complete commit message — subject line and body — following the Conventional Commits specification. The subject must be under 72 characters. The body must describe what changed, why the split was made, and the migration path for callers. Avoid passive voice. Do not use the words 'simply' or 'just'.",
+      "problem_type": "open_compositional",
+      "depth": "deep"
+    },
+    {
+      "id": "OC-2-shallow",
+      "goal": "Draft a cold outreach email introducing a new identity verification library to a potential enterprise customer",
+      "problem_type": "open_compositional",
+      "depth": "shallow"
+    },
+    {
+      "id": "OC-2-deep",
+      "goal": "You are the founder of a small software company reaching out to the head of engineering at a mid-size Australian fintech. You are introducing Sigil — a Bluetooth Low Energy device-presence verification library that replaces SMS OTP for in-person KYC workflows. The recipient is technically literate but time-constrained. Your email must: open with a concrete pain point their team already feels (SMS OTP abandonment rates at branch counters run 15-25%), explain what Sigil does and how it works in exactly two sentences, demonstrate you understand their compliance context (eIDAS 2.0, Australian Privacy Act), and close with a single low-friction next step that takes them under two minutes to complete. Subject line included. Under 200 words. No bullet points.",
+      "problem_type": "open_compositional",
+      "depth": "deep"
+    },
+    {
+      "id": "OC-3-shallow",
+      "goal": "Translate this informal Slack message into a formal engineering RFC opening paragraph: 'hey team I think we should stop using our homebrew session tokens and move to JWTs — the mobile app would be way easier and we can use existing libraries. also our tokens are like 20 chars which is probably not enough entropy right?'",
+      "problem_type": "open_compositional",
+      "depth": "shallow"
+    },
+    {
+      "id": "OC-3-deep",
+      "goal": "You are a staff engineer translating an informal Slack discussion into a formal RFC. The thread reads: 'hey team I think we should stop using our homebrew session tokens and move to JWTs — the mobile app would be WAY easier and we can use existing libraries. also our tokens are like 20 chars which is probably not enough entropy right? @alice said the auth service rewrite is coming up anyway'. Write the opening section of the RFC, covering: a one-sentence problem statement, a motivation paragraph that names the concrete security and developer-experience costs of the current approach (quantify entropy weakness in bits), the proposed solution in one paragraph, and a two-sentence scope boundary that states explicitly what is and is not in scope. Use formal prose. Do not use hedging language ('might', 'could consider', 'perhaps'). The RFC will be reviewed by a security-focused CISO.",
+      "problem_type": "open_compositional",
+      "depth": "deep"
+    },
+    {
+      "id": "OC-4-shallow",
+      "goal": "Write a technical blog post introduction explaining how QUBO maps prompt feature selection to a binary optimisation problem",
+      "problem_type": "open_compositional",
+      "depth": "shallow"
+    },
+    {
+      "id": "OC-4-deep",
+      "goal": "Write the opening section of a technical blog post for the Waratah Labs engineering blog. Audience: ML engineers who are fluent in transformers and attention mechanisms but have no quantum computing background. The post explains how selecting which prompt features to include — tone, examples, constraints, role assignment, length directive — can be modelled as a Quadratic Unconstrained Binary Optimisation problem, and why that framing makes the problem tractable for quantum-approximate solvers. Structure: paragraph 1 must hook the reader with an everyday analogy that doesn't require ML knowledge. Paragraph 2 must introduce QUBO without algebraic notation, using a two-variable worked example. Paragraph 3 must bridge to prompt engineering specifically: name the prompt features as variables and explain why the quadratic terms (co-occurrence weights) matter. End the section with a one-sentence transition to the next section. No emojis. No hype. Concrete over abstract.",
+      "problem_type": "open_compositional",
+      "depth": "deep"
+    },
+    {
+      "id": "OC-5-shallow",
+      "goal": "Write a pitch paragraph for a hardware-first privacy tool to a non-technical government procurement officer",
+      "problem_type": "open_compositional",
+      "depth": "shallow"
+    },
+    {
+      "id": "OC-5-deep",
+      "goal": "You are pitching Argus — an on-device AI assistant that processes sensitive government data entirely on a local hardware enclave, with zero cloud dependency — to a non-technical procurement officer at a mid-size federal agency. The officer's primary concerns are: data sovereignty, auditability under the PSPF, and avoiding vendor lock-in from cloud AI providers. Write a single pitch paragraph of 120-150 words. The paragraph must: open with the procurement officer's problem (not your product), explain the hardware-first approach in plain language without using the words 'AI', 'machine learning', or 'model', name the specific compliance benefit (PSPF Protective Security Policy, ISM controls 0714 and 1145), and close with a single confident statement of differentiation from cloud alternatives. Avoid passive voice. No bullet points. No acronyms without expansion.",
+      "problem_type": "open_compositional",
+      "depth": "deep"
+    },
+    {
+      "id": "AN-1-shallow",
+      "goal": "Analyse this code diff and flag any security issues: a new Flask endpoint accepts a 'filename' parameter and serves os.path.join('/data/exports', filename) with no authentication",
+      "problem_type": "analytical",
+      "depth": "shallow"
+    },
+    {
+      "id": "AN-1-deep",
+      "goal": "You are a senior security engineer performing a formal code review on a Python pull request. The diff introduces a new Flask endpoint: `@app.route('/api/export') def export(): filename = request.args.get('filename', ''); path = os.path.join('/data/exports', filename); return send_file(path)`. The endpoint has no authentication decorator. The service runs behind an internal nginx proxy but is reachable from all employees on the corporate VPN. Perform a complete security analysis. For each vulnerability: (1) name it using CWE identifier and OWASP Top 10 category, (2) describe the specific exploit path an attacker on the VPN could take, (3) assign CVSS v3.1 severity (Critical/High/Medium/Low), (4) write a one-sentence remediation. List issues in descending severity. Be exhaustive — assume the reviewer will file tickets against every item you surface.",
+      "problem_type": "analytical",
+      "depth": "deep"
+    },
+    {
+      "id": "AN-2-shallow",
+      "goal": "Explain the trade-offs between using a diagonal QUBO versus adding off-diagonal cross-terms for combinatorial optimisation to a senior ML engineer",
+      "problem_type": "analytical",
+      "depth": "shallow"
+    },
+    {
+      "id": "AN-2-deep",
+      "goal": "Write a structured technical comparison for a senior ML engineer who has strong background in classical optimisation (gradient descent, branch-and-bound, simulated annealing) but no prior quantum computing knowledge. Compare diagonal QUBO formulation against full off-diagonal QUBO with ZZ cross-terms on five axes: (1) expressivity of the cost landscape, (2) circuit depth scaling with problem size, (3) classical preprocessing cost to compute co-occurrence weights, (4) susceptibility to barren plateaus in COBYLA optimisation, and (5) when greedy classical selection is provably optimal for each. For each axis, give a concrete statement of how each formulation behaves and name the regime where each is preferable. Include a final recommendation paragraph for a team evaluating which QUBO variant to use for a 20-30 variable binary feature selection problem running on a simulator with 24 qubits.",
+      "problem_type": "analytical",
+      "depth": "deep"
+    },
+    {
+      "id": "AN-3-shallow",
+      "goal": "Identify the root cause and three action items for this incident: a mobile banking app was down for 47 minutes after a dependency version bump (requests 2.28 to 2.32) broke session serialisation in production",
+      "problem_type": "analytical",
+      "depth": "shallow"
+    },
+    {
+      "id": "AN-3-deep",
+      "goal": "You are an SRE writing a blameless incident postmortem for distribution to engineering leadership and the on-call rotation. Incident details: a mobile banking app serving approximately 15,000 daily active users experienced a 47-minute complete login outage on a Tuesday morning at 09:14 AEST. The outage began when a routine CI/CD deployment bumped `requests` from 2.28 to 2.32. The version change triggered a breaking change in the session serialisation layer (pickle protocol version mismatch with a cached session format). The on-call engineer identified the deployment as the trigger and rolled back after 47 minutes. There was no staging environment integration test covering this code path. The version bump was not reviewed by a second engineer. Write: (1) a two-sentence executive summary, (2) a timeline with five entries using UTC timestamps, (3) a root cause analysis using the 5 Whys structure (write out each Why/Because pair), (4) three corrective action items each with an owner role, acceptance criterion, and due-in weeks.",
+      "problem_type": "analytical",
+      "depth": "deep"
+    },
+    {
+      "id": "AN-4-shallow",
+      "goal": "Evaluate whether a Python project should replace the requests library with httpx given that existing tests use requests-mock",
+      "problem_type": "analytical",
+      "depth": "shallow"
+    },
+    {
+      "id": "AN-4-deep",
+      "goal": "You are a principal engineer evaluating a library migration proposal for a production Python service with approximately 40,000 lines of code. The proposal is to replace the `requests` library with `httpx` to gain native async/await support and HTTP/2 multiplexing. Context: the service is I/O-bound; bottleneck analysis shows 60% of request latency comes from sequential HTTP calls to a third-party API that supports HTTP/2. The codebase has 180 unit tests that mock `requests` using `requests-mock`. The team consists of 3 senior and 2 junior engineers; none have shipped async Python in production before. Evaluate the migration on five axes: (1) expected latency improvement from HTTP/2 multiplexing (quantify if possible), (2) migration effort in engineer-weeks including test rewrites, (3) risk surface (name three specific failure modes), (4) test strategy after migration, (5) team capability gap and how to close it. Conclude with a go/no-go recommendation and a single sentence of justification. No hedging.",
+      "problem_type": "analytical",
+      "depth": "deep"
+    },
+    {
+      "id": "AN-5-shallow",
+      "goal": "Identify the failure modes when a Kafka consumer group falls 90 minutes behind producers during peak load",
+      "problem_type": "analytical",
+      "depth": "shallow"
+    },
+    {
+      "id": "AN-5-deep",
+      "goal": "You are a distributed systems engineer reviewing a Kafka-based event pipeline. Architecture: three consumer groups process the same topic. Producer throughput: 50,000 events/minute. Consumer group A (order processing, 6 partitions, 6 consumers): lagging 90 minutes behind during Tuesday morning peak. Consumer group B (analytics, indefinite retention): processing at 30% of producer throughput and falling further behind each day. Consumer group C (push notifications, 6 partitions, 6 consumers): caught up, no lag. Perform a structured failure mode analysis. For consumer group A and B separately: identify the primary failure mode, describe the trigger condition in terms of observable metrics, describe the business impact if not resolved, and propose a mitigation with an estimated implementation effort. Then identify two cross-cutting architectural risks that affect both groups. For each risk: name it, describe the blast radius, and propose a structural fix. Finish with a prioritised remediation sequence (most urgent first).",
+      "problem_type": "analytical",
+      "depth": "deep"
+    },
+    {
+      "id": "SO-1-shallow",
+      "goal": "Write a Python function docstring for a function that takes a QUBO matrix and candidate IDs and returns a ranked shortlist",
+      "problem_type": "structured_output",
+      "depth": "shallow"
+    },
+    {
+      "id": "SO-1-deep",
+      "goal": "Write a complete Google-style docstring for the following Python method signature: `def qubo_to_shortlist(self, qubo_matrix: np.ndarray, candidate_ids: list[str], shortlist_size: int = 10) -> list[str]`. The method belongs to a `QuantumOptimizer` class. It accepts a symmetric 2D numpy array representing the QUBO cost matrix, a list of string identifiers (one per row/column), and an optional shortlist size, and returns the identifiers of the top candidates selected by QAOA optimisation. The docstring must conform exactly to Google docstring format and include: a one-line summary (imperative mood, under 72 characters), an extended description paragraph explaining the QAOA optimisation process, an Args section with type annotation, shape constraint (NxN for qubo_matrix), and description for each parameter, a Returns section with type and description, a Raises section covering `ValueError` for non-square matrix or mismatched candidate_ids length, and `RuntimeError` if COBYLA fails to converge in the configured iteration limit, and an Example block using `>>>` doctest syntax with a 3x3 example. Do not include type annotations in the docstring Args — they are already in the signature.",
+      "problem_type": "structured_output",
+      "depth": "deep"
+    },
+    {
+      "id": "SO-2-shallow",
+      "goal": "Write a GitHub Actions workflow YAML that runs pytest, ruff, and builds a Docker image on push to main",
+      "problem_type": "structured_output",
+      "depth": "shallow"
+    },
+    {
+      "id": "SO-2-deep",
+      "goal": "Write a complete GitHub Actions workflow YAML file for a Python monorepo. Requirements: trigger on push to `main` and on pull_request targeting `main`; run on `ubuntu-22.04`; use Python 3.11; install dependencies with `pip install -e '.[dev]'`; run `ruff check .` for linting (fail on any error); run `pytest tests/ --cov=src --cov-report=xml` for tests; enforce minimum 80% coverage using `--cov-fail-under=80`; build a Docker image tagged with both `latest` and the 8-character git SHA using a `./Dockerfile`; push the image to GitHub Container Registry (`ghcr.io`) only on push to `main` (not on PRs); use `docker/login-action@v3` for registry authentication with `GITHUB_TOKEN`; name the workflow `CI`. Use only the necessary YAML keys. Do not add comments. Job names must be `lint`, `test`, and `build`. The `build` job must depend on both `lint` and `test`.",
+      "problem_type": "structured_output",
+      "depth": "deep"
+    },
+    {
+      "id": "SO-3-shallow",
+      "goal": "Write an OpenAPI 3.0 path entry for a POST endpoint that accepts a list of optimisation goals and returns a batch ID",
+      "problem_type": "structured_output",
+      "depth": "shallow"
+    },
+    {
+      "id": "SO-3-deep",
+      "goal": "Write a complete OpenAPI 3.0 YAML fragment covering the path definition and all referenced component schemas for the `POST /api/batch` endpoint of a quantum prompt optimisation service. The request body (required) must include: `goals` (required array of strings, minItems 1, maxItems 100, each item minLength 1), `backend` (optional string enum of `stub`, `lightning`, `braket-sim`, `braket-qpu`, default `stub`), `runs_per_goal` (optional integer, minimum 1, maximum 10, default 1). Successful response: 202 with body containing `batch_id` (string, format uuid). Error response: 400 with body containing `error` (string). Include the full `components/schemas` definitions for `BatchRequest`, `BatchResponse`, and `ErrorResponse`. All schemas must use `additionalProperties: false`. Use YAML format. Do not include the `openapi`, `info`, or `servers` keys — only `paths` and `components`.",
+      "problem_type": "structured_output",
+      "depth": "deep"
+    },
+    {
+      "id": "SO-4-shallow",
+      "goal": "Write Python type annotations for a method that accepts a QUBO cost matrix and returns either a list of IDs or a list of scored tuples depending on a flag",
+      "problem_type": "structured_output",
+      "depth": "shallow"
+    },
+    {
+      "id": "SO-4-deep",
+      "goal": "Write the complete Python type annotation stubs using `typing.overload` for a method `qubo_to_shortlist` on a class `QuantumOptimizer`. The method has two call signatures: (1) when `return_scores=False` (the default), it accepts `qubo_matrix: np.ndarray`, `candidate_ids: list[str]`, `shortlist_size: int = 10`, `return_scores: Literal[False] = False` and returns `list[str]`; (2) when `return_scores=True`, it accepts the same first three parameters, `return_scores: Literal[True]`, and returns `list[tuple[str, float]]`. Write the two `@overload` decorated stubs and the actual implementation signature (which must use a `Union` return type). All annotations must be compatible with Python 3.11, pass `mypy --strict`, and import only from `typing`, `typing_extensions` (if needed), and `numpy`. Do not write the method body — only the overload stubs and the implementation signature line. Include all necessary imports.",
+      "problem_type": "structured_output",
+      "depth": "deep"
+    },
+    {
+      "id": "SO-5-shallow",
+      "goal": "Write a JSON Schema for a pipeline log entry with timestamp, run_id, level, stage, and message fields",
+      "problem_type": "structured_output",
+      "depth": "shallow"
+    },
+    {
+      "id": "SO-5-deep",
+      "goal": "Write a complete JSON Schema (draft-07) document that validates structured log entries emitted by a quantum pipeline service. Each log entry must have: `timestamp` (string, format date-time, ISO 8601), `run_id` (string, format uuid), `level` (string, enum of exactly `debug`, `info`, `warning`, `error`, `critical` — lowercase only), `stage` (integer, minimum 1, maximum 5), `message` (string, minLength 1, maxLength 1000), and an optional `metrics` object where all property values must be numbers (`additionalProperties: {type: number}`). Constraints: `additionalProperties` must be false at the root level. When `level` is `error` or `critical`, `stage` must be required (use `if`/`then` with an `anyOf` on the two level values). The schema must be self-contained with a `$schema` key and a `title`. Write valid JSON.",
+      "problem_type": "structured_output",
+      "depth": "deep"
+    }
+  ]
+}

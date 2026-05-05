@@ -80,6 +80,10 @@ def init_db(db_path: Path = _DB_PATH) -> None:
             "CREATE INDEX IF NOT EXISTS idx_jobs_batch_status "
             "ON jobs (batch_id, status)"
         )
+        try:
+            conn.execute("ALTER TABLE jobs ADD COLUMN metadata_json TEXT")
+        except Exception:
+            pass  # column already exists
 
 
 def save_run(
@@ -195,20 +199,31 @@ def create_jobs(
     goals: list[str],
     backend: str,
     runs_per_goal: int,
+    metadata: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     """Insert one job per (goal, rep) for the batch. Returns the job_ids in
-    insertion order."""
+    insertion order.
+
+    When `metadata` is provided, it must be a list aligned with `goals` —
+    each goal's metadata dict is JSON-serialised and stored on every rep
+    of that goal. When None, metadata_json is stored as NULL.
+    """
     job_ids: list[str] = []
-    rows: list[tuple[str, str, str, int, str]] = []
-    for goal in goals:
+    rows: list[tuple[str, str, str, int, str, str | None]] = []
+    for idx, goal in enumerate(goals):
+        meta_json: str | None
+        if metadata is not None:
+            meta_json = json.dumps(metadata[idx])
+        else:
+            meta_json = None
         for rep in range(runs_per_goal):
             jid = str(uuid.uuid4())
             job_ids.append(jid)
-            rows.append((jid, batch_id, goal, rep, backend))
+            rows.append((jid, batch_id, goal, rep, backend, meta_json))
     with _connect() as conn:
         conn.executemany(
-            "INSERT INTO jobs (job_id, batch_id, goal, rep, backend) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO jobs (job_id, batch_id, goal, rep, backend, metadata_json) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             rows,
         )
     return job_ids
@@ -296,7 +311,13 @@ def get_batch_jobs(batch_id: str) -> list[dict[str, Any]]:
             "SELECT * FROM jobs WHERE batch_id=? ORDER BY created_at ASC",
             (batch_id,),
         ).fetchall()
-    return [dict(r) for r in rows]
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        d = dict(r)
+        meta_raw = d.pop("metadata_json", None)
+        d["metadata"] = json.loads(meta_raw) if meta_raw else None
+        out.append(d)
+    return out
 
 
 def get_batch_progress(batch_id: str) -> dict[str, int]:
