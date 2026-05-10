@@ -46,6 +46,7 @@ class Pipeline:
         max_candidates: int = 512,
         qaoa_prefilter_size: int = 28,
         history_endpoint: str = "",
+        run_history: list | None = None,
     ) -> None:
         """Initialize pipeline with components.
 
@@ -58,6 +59,7 @@ class Pipeline:
             max_candidates: Cap on candidate space (default 512)
             qaoa_prefilter_size: Top-N pre-scored candidates to pass to QAOA (limits qubits)
             history_endpoint: QPO server URL for fetching run history (off-diagonal QUBO)
+            run_history: Pre-loaded run records (skips HTTP fetch when provided)
         """
         cfg = get_config()
         ep = cfg.ollama.local_7b_endpoint
@@ -74,6 +76,7 @@ class Pipeline:
         self.qaoa_prefilter_size = qaoa_prefilter_size or cfg.pipeline.qaoa_prefilter_size
         # QPO server is always localhost — the Ollama host is a separate machine.
         self.history_endpoint = history_endpoint or "http://localhost:5001"
+        self._run_history_override = run_history
 
     def run(
         self,
@@ -179,11 +182,14 @@ class Pipeline:
         qubo_diag = [sc.pre_score for sc in prefiltered]
         candidate_ids = [sc.candidate.variant_id for sc in prefiltered]
         candidate_feature_vecs = [sc.candidate.feature_values for sc in prefiltered]
-        try:
-            run_history = fetch_run_history(self.history_endpoint)
-        except Exception as exc:
-            logger.warning("Could not fetch run history for co-occurrence (%s) — diagonal QUBO only", exc)
-            run_history = []
+        if self._run_history_override is not None:
+            run_history = self._run_history_override
+        else:
+            try:
+                run_history = fetch_run_history(self.history_endpoint)
+            except Exception as exc:
+                logger.warning("Could not fetch run history for co-occurrence (%s) — diagonal QUBO only", exc)
+                run_history = []
         qubo_matrix = build_qubo_matrix(
             qubo_diag,
             candidate_feature_vecs,

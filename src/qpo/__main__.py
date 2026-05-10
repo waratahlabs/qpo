@@ -10,7 +10,7 @@ import sys
 
 from qpo import Intent, Pipeline
 from qpo.config import get_config, set_config
-from qpo.db import init_db, save_run
+from qpo.db import init_db, list_runs, save_run
 
 
 def setup_logging(log_level: str) -> None:
@@ -203,8 +203,9 @@ def _run_batch(args: argparse.Namespace) -> int:
     # 8. Initialise DB
     init_db()
 
-    # 9. Build pipeline
-    pipeline = Pipeline(max_candidates=config.pipeline.max_candidates)
+    # 9. Build pipeline — load run history from local DB for off-diagonal QUBO
+    run_history = list_runs(full=True)
+    pipeline = Pipeline(max_candidates=config.pipeline.max_candidates, run_history=run_history)
 
     # 10. Per-goal accumulators
     accumulators: list[dict] = []
