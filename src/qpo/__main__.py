@@ -7,6 +7,7 @@ import argparse
 import json
 import logging
 import sys
+from pathlib import Path
 
 from qpo import Intent, Pipeline
 from qpo.config import get_config, set_config
@@ -260,37 +261,16 @@ def _run_batch(args: argparse.Namespace) -> int:
                     acc["losses"] += 1
                     acc["completed"] += 1
                     completed += 1
+                if args.output and completed % 5 == 0:
+                    _write_results(args.output, data, backend, reps, completed, accumulators)
+                    logger.info(f"Checkpoint written at {completed}/{total}")
     except KeyboardInterrupt:
         interrupted = True
         print("\nInterrupted — writing partial results...")
 
     # 13. Write output JSON if requested
     if args.output:
-        out_goals = []
-        for acc in accumulators:
-            done = acc["completed"]
-            mean_delta = (acc["delta_sum"] / done) if done > 0 else 0.0
-            out_goals.append(
-                {
-                    "id": acc["id"],
-                    "goal": acc["goal_text"],
-                    "metadata": acc["metadata"],
-                    "reps": done,
-                    "wins": acc["wins"],
-                    "losses": acc["losses"],
-                    "ties": acc["ties"],
-                    "mean_delta": mean_delta,
-                }
-            )
-        out_data = {
-            "experiment_id": data.get("experiment_id", "batch"),
-            "backend": backend,
-            "runs_per_goal": reps,
-            "total_runs": completed,
-            "goals": out_goals,
-        }
-        with open(args.output, "w") as f:
-            json.dump(out_data, f, indent=2)
+        _write_results(args.output, data, backend, reps, completed, accumulators)
         logger.info(f"Batch results written to {args.output}")
 
     # 14. Summary table
@@ -299,6 +279,43 @@ def _run_batch(args: argparse.Namespace) -> int:
     if interrupted:
         return 130
     return 0
+
+
+def _write_results(
+    path: str,
+    data: dict,
+    backend: str,
+    reps: int,
+    completed: int,
+    accumulators: list[dict],
+) -> None:
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_goals = []
+    for acc in accumulators:
+        done = acc["completed"]
+        mean_delta = (acc["delta_sum"] / done) if done > 0 else 0.0
+        out_goals.append(
+            {
+                "id": acc["id"],
+                "goal": acc["goal_text"],
+                "metadata": acc["metadata"],
+                "reps": done,
+                "wins": acc["wins"],
+                "losses": acc["losses"],
+                "ties": acc["ties"],
+                "mean_delta": mean_delta,
+            }
+        )
+    out_data = {
+        "experiment_id": data.get("experiment_id", "batch"),
+        "backend": backend,
+        "runs_per_goal": reps,
+        "total_runs": completed,
+        "goals": out_goals,
+    }
+    with open(out_path, "w") as f:
+        json.dump(out_data, f, indent=2)
 
 
 def _print_summary_table(accumulators: list[dict]) -> None:
