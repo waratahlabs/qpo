@@ -261,9 +261,8 @@ def _run_batch(args: argparse.Namespace) -> int:
                     acc["losses"] += 1
                     acc["completed"] += 1
                     completed += 1
-                if args.output and completed % 5 == 0:
+                if args.output:
                     _write_results(args.output, data, backend, reps, completed, accumulators)
-                    logger.info(f"Checkpoint written at {completed}/{total}")
     except KeyboardInterrupt:
         interrupted = True
         print("\nInterrupted — writing partial results...")
