@@ -44,7 +44,7 @@ class Pipeline:
         quantum_optimizer: Optional[QuantumOptimizer] = None,
         deep_evaluator: Optional[DeepEvaluator] = None,
         max_candidates: int = 512,
-        qaoa_prefilter_size: int = 28,
+        qaoa_prefilter_size: int = 0,
         history_endpoint: str = "",
         run_history: list | None = None,
     ) -> None:
