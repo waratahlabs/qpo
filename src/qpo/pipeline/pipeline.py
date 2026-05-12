@@ -70,7 +70,10 @@ class Pipeline:
         self.decomposer = decomposer or Decomposer(ollama_endpoint=ep, model=m7b, timeout_s=t)
         self.prompt_builder = prompt_builder or PromptBuilder(ollama_endpoint=ep, model=m7b, timeout_s=t)
         self.pre_scorer = pre_scorer or PreScorer(ollama_endpoint=ep, model=m7b, timeout_s=t)
-        self.quantum_optimizer = quantum_optimizer or QuantumOptimizer()
+        self.quantum_optimizer = quantum_optimizer or QuantumOptimizer(
+            circuit_depth=cfg.quantum.circuit_depth,
+            num_iterations=cfg.quantum.num_iterations,
+        )
         self.deep_evaluator = deep_evaluator or DeepEvaluator(ollama_endpoint=ep32, model=m32b, timeout_s=t)
         self.max_candidates = max_candidates or cfg.pipeline.max_candidates
         self.qaoa_prefilter_size = qaoa_prefilter_size or cfg.pipeline.qaoa_prefilter_size
