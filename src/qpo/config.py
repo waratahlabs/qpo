@@ -53,7 +53,7 @@ class PipelineConfig:
     min_feature_axes: int = 6
     max_feature_axes: int = 14
     pre_score_timeout_s: int = 900  # 15 minutes per AC-1.3
-    qaoa_prefilter_size: int = 28  # Pre-filter to top-N before QAOA (limits qubit count); 28 = ~4 GB VRAM
+    qaoa_prefilter_size: int = 24  # Pre-filter to top-N before QAOA (limits qubit count); 24 = 256MB VRAM, EX-005 spec
 
 
 @dataclass
