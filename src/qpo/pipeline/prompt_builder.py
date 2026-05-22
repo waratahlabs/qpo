@@ -16,6 +16,7 @@ import re
 import requests
 
 from qpo.models import PromptTemplate
+from qpo.pipeline.utils import post_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -70,13 +71,42 @@ _PATTERN_MODIFIERS: list[tuple[str, str]] = [
 ]
 
 
+_ANTHROPIC_SYSTEM = """\
+You are a prompt engineering expert. Your job is to design reusable prompt templates \
+for optimization tasks.
+
+When given a GOAL and a list of FEATURE AXES, produce a base prompt that accomplishes the \
+goal cleanly, plus a modifier phrase for each axis. When an axis is ON (value=1), its \
+modifier is appended to the base prompt. Modifiers must be:
+- Independently meaningful (each changes something concrete about how the task is done)
+- Non-contradictory (any combination of modifiers produces a coherent prompt)
+- 1-3 sentences each
+
+Return ONLY valid JSON in this exact format:
+{
+  "base": "<core instruction that accomplishes the goal with no extras>",
+  "modifiers": {
+    "<axis_name>": "<modifier text appended when this axis is ON>",
+    ...one entry per axis...
+  }
+}\
+"""
+
+
 class PromptBuilder:
     """Builds a PromptTemplate from a goal and axis list with a single LLM call."""
 
-    def __init__(self, ollama_endpoint: str = "http://localhost:11434", model: str = "mistral:7b", timeout_s: int = 180) -> None:
+    def __init__(
+        self,
+        ollama_endpoint: str = "http://localhost:11434",
+        model: str = "mistral:7b",
+        timeout_s: int = 180,
+        backend: str = "ollama",
+    ) -> None:
         self.ollama_endpoint = ollama_endpoint
         self.model = model
         self.timeout_s = timeout_s
+        self.backend = backend
 
     def build_template(self, goal: str, axes: list[str]) -> PromptTemplate:
         """Build a PromptTemplate for the given goal and axes.
@@ -91,21 +121,53 @@ class PromptBuilder:
             PromptTemplate with base prompt and per-axis modifiers
         """
         try:
+            if self.backend == "bedrock":
+                return self._build_via_anthropic(goal, axes)
             return self._build_via_llm(goal, axes)
         except Exception as exc:
             logger.warning("LLM template build failed (%s), using pattern fallback", exc)
             return self._pattern_template(goal, axes)
 
+    def _build_via_anthropic(self, goal: str, axes: list[str]) -> PromptTemplate:
+        from qpo.pipeline import anthropic_llm
+
+        axes_str = ", ".join(axes)
+        user_prompt = f"GOAL: {goal}\n\nFEATURE AXES: {axes_str}"
+        text = anthropic_llm.call(
+            model=self.model,
+            system_prompt=_ANTHROPIC_SYSTEM,
+            user_prompt=user_prompt,
+            max_tokens=2048,
+            timeout=self.timeout_s,
+        )
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if not match:
+            raise ValueError(f"No JSON block in Anthropic template response: {text[:200]!r}")
+
+        data = json.loads(match.group())
+        base = data.get("base", "").strip()
+        modifiers: dict[str, str] = data.get("modifiers", {})
+
+        if not base:
+            raise ValueError("Anthropic returned empty base prompt")
+
+        for axis in axes:
+            if axis not in modifiers:
+                modifiers[axis] = self._pattern_modifier(axis)
+                logger.debug("Anthropic missed axis %r — filled with pattern fallback", axis)
+
+        logger.info("Built Anthropic prompt template: base=%d chars, %d modifiers", len(base), len(modifiers))
+        return PromptTemplate(base=base, modifiers=modifiers)
+
     def _build_via_llm(self, goal: str, axes: list[str]) -> PromptTemplate:
         axes_str = ", ".join(axes)
         prompt = _BUILD_PROMPT.format(goal=goal, axes=axes_str)
 
-        response = requests.post(
+        response = post_with_retry(
             f"{self.ollama_endpoint}/api/generate",
-            json={"model": self.model, "prompt": prompt, "stream": False, "think": False},
+            json_body={"model": self.model, "prompt": prompt, "stream": False, "think": False},
             timeout=self.timeout_s,
         )
-        response.raise_for_status()
         text = response.json()["response"]
 
         match = re.search(r"\{.*\}", text, re.DOTALL)

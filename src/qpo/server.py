@@ -121,6 +121,7 @@ def start_run() -> Response:
                     score=result.winning_score or 0.0,
                     latency_s=result.total_latency_s,
                     result_json=result.model_dump_json(),
+                    qaoa_status=result.metadata.get("qaoa_status", "ok"),
                 )
             except Exception as db_exc:
                 logger.exception("save_run failed for %s", result.run_id)
@@ -213,10 +214,24 @@ def get_run_history() -> Response:
 # ---------------------------------------------------------------------------
 
 
-def _run_batch_worker(batch_id: str, batch_q: queue.Queue, total: int, runs_per_goal: int) -> None:
+def _run_batch_worker(
+    batch_id: str,
+    batch_q: queue.Queue,
+    batch_buffer: list,
+    total: int,
+    runs_per_goal: int,
+) -> None:
     """Pull-model batch worker. Loops until no pending or failed-retryable
     jobs remain. Safe to invoke either fresh or as a resume — claim_next_job
     is atomic and requeue_failed_jobs only acts on attempts < MAX."""
+
+    def emit_batch(event: dict) -> None:
+        with _run_queues_lock:
+            batch_buffer.append(event)
+            if len(batch_buffer) > MAX_EVENT_BUFFER:
+                del batch_buffer[0:len(batch_buffer) - MAX_EVENT_BUFFER]
+        batch_q.put(event)
+
     try:
         # Requeue once before the claim loop. Calling it inside the loop turns
         # a fast-failing job into an instant attempts-burner.
@@ -227,7 +242,7 @@ def _run_batch_worker(batch_id: str, batch_q: queue.Queue, total: int, runs_per_
                 break
 
             progress = get_batch_progress(batch_id)
-            batch_q.put({
+            emit_batch({
                 "type": "batch_progress",
                 "done": progress["complete"],
                 "total": total,
@@ -288,6 +303,7 @@ def _run_batch_worker(batch_id: str, batch_q: queue.Queue, total: int, runs_per_
                     score=result.winning_score or 0.0,
                     latency_s=result.total_latency_s,
                     result_json=result.model_dump_json(),
+                    qaoa_status=result.metadata.get("qaoa_status", "ok"),
                 )
                 complete_job(job["job_id"], result_dict)
             except Exception as exc:
@@ -303,14 +319,14 @@ def _run_batch_worker(batch_id: str, batch_q: queue.Queue, total: int, runs_per_
         failed_count = sum(1 for j in jobs if j["status"] == "failed")
         final_status = "complete" if failed_count == 0 else "partial"
         update_batch(batch_id, final_status, results)
-        batch_q.put({
+        emit_batch({
             "type": "batch_done",
             "batch_id": batch_id,
             "results": results,
             "failed": failed_count,
         })
     except Exception as exc:
-        batch_q.put({"type": "error", "message": str(exc)})
+        emit_batch({"type": "error", "message": str(exc)})
         logger.exception("Batch worker crashed for %s", batch_id)
     finally:
         batch_q.put(None)
@@ -334,12 +350,14 @@ def start_batch() -> Response:
     total = len(goals) * runs_per_goal
 
     batch_q: queue.Queue = queue.Queue()
+    batch_buffer: list = []
     with _run_queues_lock:
         _run_queues[f"batch:{batch_id}"] = batch_q
+        _run_event_buffers[f"batch:{batch_id}"] = batch_buffer
 
     threading.Thread(
         target=_run_batch_worker,
-        args=(batch_id, batch_q, total, runs_per_goal),
+        args=(batch_id, batch_q, batch_buffer, total, runs_per_goal),
         daemon=True,
     ).start()
     return jsonify({"batch_id": batch_id}), 202
@@ -352,12 +370,19 @@ def batch_events(batch_id: str) -> Response:
         while True:
             with _run_queues_lock:
                 q = _run_queues.get(f"batch:{batch_id}")
+                buf_snapshot = list(_run_event_buffers.get(f"batch:{batch_id}", []))
             if q is not None:
                 break
             if time.monotonic() > deadline:
                 yield _sse({"type": "error", "message": "batch not found"})
                 return
             time.sleep(0.1)
+
+        # Replay buffered events so reconnecting clients see history.
+        seen = len(buf_snapshot)
+        for ev in buf_snapshot:
+            yield _sse(ev)
+
         while True:
             try:
                 event = q.get(timeout=30)
@@ -366,6 +391,9 @@ def batch_events(batch_id: str) -> Response:
                 continue
             if event is None:
                 break
+            if seen > 0:
+                seen -= 1
+                continue
             yield _sse(event)
 
     return Response(generate(), mimetype="text/event-stream",
@@ -402,12 +430,14 @@ def resume_batch(batch_id: str) -> Response:
 
     # Spawn (or replace) the batch event queue and worker thread.
     batch_q: queue.Queue = queue.Queue()
+    batch_buffer: list = []
     with _run_queues_lock:
         _run_queues[f"batch:{batch_id}"] = batch_q
+        _run_event_buffers[f"batch:{batch_id}"] = batch_buffer
 
     threading.Thread(
         target=_run_batch_worker,
-        args=(batch_id, batch_q, total, runs_per_goal),
+        args=(batch_id, batch_q, batch_buffer, total, runs_per_goal),
         daemon=True,
     ).start()
     return jsonify({"batch_id": batch_id, "requeued": requeued}), 202

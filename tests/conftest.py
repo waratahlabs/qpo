@@ -78,16 +78,16 @@ def mock_ollama_response():
 class _StubPreScorer(PreScorer):
     """PreScorer that returns deterministic scores without HTTP calls (CI use only)."""
 
-    def _score_candidate(self, candidate: Candidate) -> float:
-        return 0.5 + (hash(candidate.variant_id) % 100) / 200.0
+    def _score_candidate(self, candidate: Candidate) -> tuple[float, bool]:
+        return 0.5 + (hash(candidate.variant_id) % 100) / 200.0, False
 
 
 class _StubDeepEvaluator(DeepEvaluator):
     """DeepEvaluator that returns deterministic scores without HTTP calls (CI use only)."""
 
-    def _evaluate_candidate(self, candidate: Candidate) -> tuple[float, str]:
+    def _evaluate_candidate(self, candidate: Candidate) -> tuple[float, str, bool]:
         score = 0.6 + (hash(candidate.variant_id) % 100) / 250.0
-        return score, f"Stub eval for {candidate.variant_id}"
+        return score, f"Stub eval for {candidate.variant_id}", False
 
 
 @pytest.fixture

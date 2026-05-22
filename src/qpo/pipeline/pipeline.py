@@ -6,9 +6,12 @@ output. Output includes: winning variant, its feature axis settings, and its eva
 the pre-score mean.
 """
 
+import hashlib
 import logging
+import subprocess
 import time
 import uuid
+from dataclasses import asdict
 from typing import Callable, Optional
 
 import numpy as np
@@ -24,6 +27,41 @@ from qpo.pipeline.prompt_builder import PromptBuilder
 from qpo.quantum.optimizer import QuantumOptimizer
 
 logger = logging.getLogger(__name__)
+
+
+def _collect_provenance(config) -> dict:
+    """Collect run provenance: git SHA, library versions, config hash.
+
+    Never raises — any collection failure is recorded as 'unknown'.
+    """
+    prov: dict = {}
+
+    try:
+        prov["git_sha"] = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        prov["git_sha"] = "unknown"
+
+    for lib in ("pennylane", "numpy", "scipy"):
+        try:
+            import importlib
+            mod = importlib.import_module(lib)
+            prov[lib] = getattr(mod, "__version__", "unknown")
+        except Exception:
+            prov[lib] = "unknown"
+
+    try:
+        config_dict = asdict(config)
+        prov["config_hash"] = hashlib.md5(
+            str(sorted(config_dict.items())).encode()
+        ).hexdigest()[:8]
+    except Exception:
+        prov["config_hash"] = "unknown"
+
+    return prov
 
 
 class Pipeline:
@@ -43,7 +81,7 @@ class Pipeline:
         pre_scorer: Optional[PreScorer] = None,
         quantum_optimizer: Optional[QuantumOptimizer] = None,
         deep_evaluator: Optional[DeepEvaluator] = None,
-        max_candidates: int = 512,
+        max_candidates: int = 0,
         qaoa_prefilter_size: int = 0,
         history_endpoint: str = "",
         run_history: list | None = None,
@@ -64,17 +102,22 @@ class Pipeline:
         cfg = get_config()
         ep = cfg.ollama.local_7b_endpoint
         ep32 = cfg.ollama.remote_32b_endpoint
-        m7b = cfg.ollama.local_7b_model
-        m32b = cfg.ollama.remote_32b_model
+        be = cfg.llm_backend
         t = cfg.ollama.timeout_s
-        self.decomposer = decomposer or Decomposer(ollama_endpoint=ep, model=m7b, timeout_s=t)
-        self.prompt_builder = prompt_builder or PromptBuilder(ollama_endpoint=ep, model=m7b, timeout_s=t)
-        self.pre_scorer = pre_scorer or PreScorer(ollama_endpoint=ep, model=m7b, timeout_s=t)
+        if be == "anthropic":
+            m7b = cfg.ollama.anthropic_fast_model
+            m32b = cfg.ollama.anthropic_deep_model
+        else:
+            m7b = cfg.ollama.local_7b_model
+            m32b = cfg.ollama.remote_32b_model
+        self.decomposer = decomposer or Decomposer(ollama_endpoint=ep, model=m7b, timeout_s=t, backend=be)
+        self.prompt_builder = prompt_builder or PromptBuilder(ollama_endpoint=ep, model=m7b, timeout_s=t, backend=be)
+        self.pre_scorer = pre_scorer or PreScorer(ollama_endpoint=ep, model=m7b, timeout_s=t, backend=be)
         self.quantum_optimizer = quantum_optimizer or QuantumOptimizer(
             circuit_depth=cfg.quantum.circuit_depth,
             num_iterations=cfg.quantum.num_iterations,
         )
-        self.deep_evaluator = deep_evaluator or DeepEvaluator(ollama_endpoint=ep32, model=m32b, timeout_s=t)
+        self.deep_evaluator = deep_evaluator or DeepEvaluator(ollama_endpoint=ep32, model=m32b, timeout_s=t, backend=be)
         self.max_candidates = max_candidates or cfg.pipeline.max_candidates
         self.qaoa_prefilter_size = qaoa_prefilter_size or cfg.pipeline.qaoa_prefilter_size
         # QPO server is always localhost — the Ollama host is a separate machine.
@@ -106,6 +149,8 @@ class Pipeline:
 
         run_id = run_id or str(uuid.uuid4())
         start_time = time.time()
+        cfg = get_config()
+        provenance = _collect_provenance(cfg)
 
         def ts() -> str:
             from datetime import datetime
@@ -159,8 +204,17 @@ class Pipeline:
         scored_candidates = self.pre_scorer.score_batch(candidates)
         pre_scores = [sc.pre_score for sc in scored_candidates]
         mean_pre_score = np.mean(pre_scores)
+        parse_failures_pre = sum(1 for sc in scored_candidates if sc.parse_failed)
         logger.info(f"[{run_id}] → Pre-scores: mean={mean_pre_score:.3f}, "
                     f"min={min(pre_scores):.3f}, max={max(pre_scores):.3f}")
+        if parse_failures_pre > 0:
+            logger.warning(
+                "[%s] %d/%d pre-score parse failures — those candidates scored 0.5",
+                run_id, parse_failures_pre, len(scored_candidates),
+            )
+            emit({"type": "warning",
+                  "message": f"{parse_failures_pre} pre-score parse failures — scores defaulted to 0.5",
+                  "affected": parse_failures_pre})
         emit({"type": "stage", "stage": 3, "name": "Pre-score", "status": "done"})
         emit({"type": "log", "time": ts(), "level": "ok",
               "message": f"Pre-scored {len(candidates)} candidates (mean={mean_pre_score:.3f})"})
@@ -233,6 +287,10 @@ class Pipeline:
             sc for sc in prefiltered if sc.candidate.variant_id in quantum_shortlist_ids_set
         ]
         logger.info(f"[{run_id}] → Quantum shortlist: {len(quantum_shortlist)} candidates")
+        if self.quantum_optimizer.last_run_used_fallback:
+            logger.warning("[%s] QAOA circuit failed — greedy pre-score ranking used", run_id)
+            emit({"type": "warning",
+                  "message": "QAOA circuit failed — greedy pre-score ranking used instead of quantum optimisation"})
         emit({"type": "stage", "stage": 4, "name": "QAOA", "status": "done"})
         emit({"type": "log", "time": ts(), "level": "ok",
               "message": f"QAOA shortlisted {len(quantum_shortlist)} candidates"})
@@ -263,6 +321,15 @@ class Pipeline:
             f"[{run_id}] → QAOA scores: mean={np.mean(final_scores):.3f}, "
             f"min={min(final_scores):.3f}, max={max(final_scores):.3f}"
         )
+        parse_failures_deep = sum(1 for er in eval_results if er.parse_failed)
+        if parse_failures_deep > 0:
+            logger.warning(
+                "[%s] %d/%d deep-eval parse failures — those candidates scored 0.5",
+                run_id, parse_failures_deep, len(eval_results),
+            )
+            emit({"type": "warning",
+                  "message": f"{parse_failures_deep} deep-eval parse failures — scores defaulted to 0.5",
+                  "affected": parse_failures_deep})
         emit({"type": "stage", "stage": 5, "name": "Deep eval", "status": "done"})
         emit({"type": "log", "time": ts(), "level": "ok",
               "message": f"Deep-evaluated {len(eval_results)} candidates ({overlap} shared between QAOA and classical)"})
@@ -300,6 +367,7 @@ class Pipeline:
             decomposed_goal=decomposed_goal,
             candidate_space_size=len(candidates),
             quantum_backend=self.quantum_optimizer.backend,
+            provenance=provenance,
             winning_variant=winning_variant,
             winning_score=winning_score,
             total_evaluations=len(eval_results),

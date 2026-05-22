@@ -118,12 +118,23 @@ class TestPreScorer:
         assert len(results2) > 0
 
     def test_parse_score_extracts_float(self):
-        """_parse_score handles various response formats."""
+        """_parse_score handles various response formats; returns (score, parse_failed)."""
         scorer = PreScorer()
-        assert scorer._parse_score("0.87") == pytest.approx(0.87, abs=0.01)
-        assert scorer._parse_score("Score: 0.5\nSome text") == pytest.approx(0.5, abs=0.01)
-        assert scorer._parse_score("1.5") == 1.0  # clamped
-        assert scorer._parse_score("no number here") == 0.5  # fallback
+        score, failed = scorer._parse_score("0.87")
+        assert score == pytest.approx(0.87, abs=0.01)
+        assert not failed
+
+        score, failed = scorer._parse_score("Score: 0.5\nSome text")
+        assert score == pytest.approx(0.5, abs=0.01)
+        assert not failed
+
+        score, failed = scorer._parse_score("1.5")
+        assert score == 1.0  # clamped
+        assert not failed
+
+        score, failed = scorer._parse_score("no number here")
+        assert score == 0.5  # fallback
+        assert failed  # parse actually failed
 
     def test_raises_on_connection_error(self, mock_candidates):
         """Pre-scorer raises RuntimeError when Ollama is unreachable."""

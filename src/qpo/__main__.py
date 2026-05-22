@@ -245,6 +245,7 @@ def _run_batch(args: argparse.Namespace) -> int:
                         result.winning_score,
                         result.total_latency_s,
                         result.model_dump_json(),
+                        result.metadata.get("qaoa_status", "ok"),
                     )
                     delta = result.winning_score - result.classical_winner_score
                     acc["delta_sum"] += delta
@@ -288,8 +289,6 @@ def _write_results(
     completed: int,
     accumulators: list[dict],
 ) -> None:
-    out_path = Path(path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_goals = []
     for acc in accumulators:
         done = acc["completed"]
@@ -313,8 +312,20 @@ def _write_results(
         "total_runs": completed,
         "goals": out_goals,
     }
-    with open(out_path, "w") as f:
-        json.dump(out_data, f, indent=2)
+    payload = json.dumps(out_data, indent=2)
+
+    if path.startswith("s3://"):
+        # s3://bucket/key — requires boto3 (installed via --extra bedrock)
+        import boto3
+        parts = path[5:].split("/", 1)
+        bucket, key = parts[0], parts[1] if len(parts) > 1 else "results.json"
+        boto3.client("s3").put_object(Bucket=bucket, Key=key, Body=payload.encode())
+        logger.info(f"Results uploaded to s3://{bucket}/{key}")
+    else:
+        out_path = Path(path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w") as f:
+            f.write(payload)
 
 
 def _print_summary_table(accumulators: list[dict]) -> None:

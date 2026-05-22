@@ -20,6 +20,9 @@ class OllamaConfig:
     retry_count: int = 3
     local_7b_model: str = "qwen3.5:4b"
     remote_32b_model: str = "qwen3.6:27b"
+    # Anthropic model IDs used when llm_backend="anthropic"
+    anthropic_fast_model: str = "claude-haiku-4-5"
+    anthropic_deep_model: str = "claude-sonnet-4-6"
 
 
 @dataclass
@@ -72,6 +75,7 @@ class Config:
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     log_level: str = "INFO"
     debug: bool = False
+    llm_backend: str = "ollama"  # "ollama" | "bedrock"
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -111,6 +115,9 @@ class Config:
         # Log level
         if level := os.getenv("QPO_LOG_LEVEL"):
             config.log_level = level
+
+        if backend := os.getenv("QPO_LLM_BACKEND"):
+            config.llm_backend = backend
 
         config.debug = os.getenv("QPO_DEBUG", "false").lower() == "true"
 

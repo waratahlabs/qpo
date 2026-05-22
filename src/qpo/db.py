@@ -1,18 +1,29 @@
 """SQLite persistence for QPO pipeline runs."""
 
 import json
+import os
 import sqlite3
 import threading
 import uuid
 from pathlib import Path
 from typing import Any
 
-_DB_PATH = Path("qpo_runs.db")
+# Default to repo root (two levels above this file's package directory).
+# Overridable via QPO_DB_PATH env var to prevent CWD-relative silently wrong DB.
+_DEFAULT_DB_PATH = Path(
+    os.getenv("QPO_DB_PATH", str(Path(__file__).parent.parent.parent / "qpo_runs.db"))
+)
+_DB_PATH = _DEFAULT_DB_PATH
 _DB_PATH_LOCK = threading.Lock()
 _DB_INITIALISED = False
 
+# SQLite 3.35.0 (2021-03-12) introduced the RETURNING clause used in
+# claim_next_job(). Older system SQLite versions will raise an OperationalError.
+_MIN_SQLITE_VERSION = (3, 35, 0)
+
 
 def _connect() -> sqlite3.Connection:
+    # Read _DB_PATH inside the lock so we see the current value consistently.
     with _DB_PATH_LOCK:
         path = _DB_PATH
     conn = sqlite3.connect(str(path))
@@ -20,14 +31,26 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
-def init_db(db_path: Path = _DB_PATH) -> None:
+def init_db(db_path: Path = _DEFAULT_DB_PATH) -> None:
     """Initialise the schema at db_path.
 
     Thread-safe: the global path mutation is guarded by a lock. If init_db has
     already been called with a different path, raises RuntimeError — re-init
     to a different DB inside one process is a programming error.
+
+    Raises:
+        RuntimeError: If SQLite version < 3.35.0 (RETURNING clause required).
+        RuntimeError: If reinitialised with a different path.
     """
     global _DB_PATH, _DB_INITIALISED
+
+    sqlite_ver = tuple(int(x) for x in sqlite3.sqlite_version.split("."))
+    if sqlite_ver < _MIN_SQLITE_VERSION:
+        raise RuntimeError(
+            f"SQLite {sqlite3.sqlite_version} is too old — QPO requires ≥3.35.0 "
+            "(RETURNING clause support). Upgrade SQLite or use a newer Python build."
+        )
+
     with _DB_PATH_LOCK:
         if _DB_INITIALISED and Path(_DB_PATH) != Path(db_path):
             raise RuntimeError(
@@ -43,6 +66,7 @@ def init_db(db_path: Path = _DB_PATH) -> None:
                 backend     TEXT NOT NULL,
                 score       REAL,
                 latency_s   REAL,
+                qaoa_status TEXT NOT NULL DEFAULT 'ok',
                 result_json TEXT,
                 created_at  TEXT DEFAULT (datetime('now'))
             )
@@ -80,10 +104,15 @@ def init_db(db_path: Path = _DB_PATH) -> None:
             "CREATE INDEX IF NOT EXISTS idx_jobs_batch_status "
             "ON jobs (batch_id, status)"
         )
-        try:
-            conn.execute("ALTER TABLE jobs ADD COLUMN metadata_json TEXT")
-        except Exception:
-            pass  # column already exists
+        # Safe migrations — ADD COLUMN is idempotent via the try/except pattern.
+        for migration in [
+            "ALTER TABLE jobs ADD COLUMN metadata_json TEXT",
+            "ALTER TABLE runs ADD COLUMN qaoa_status TEXT NOT NULL DEFAULT 'ok'",
+        ]:
+            try:
+                conn.execute(migration)
+            except Exception:
+                pass  # column already exists
 
 
 def save_run(
@@ -93,15 +122,16 @@ def save_run(
     score: float,
     latency_s: float,
     result_json: str,
+    qaoa_status: str = "ok",
 ) -> None:
     with _connect() as conn:
         conn.execute(
             """
             INSERT OR REPLACE INTO runs
-                (run_id, goal, backend, score, latency_s, result_json)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (run_id, goal, backend, score, latency_s, qaoa_status, result_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (run_id, goal, backend, round(score, 4), round(latency_s, 2), result_json),
+            (run_id, goal, backend, round(score, 4), round(latency_s, 2), qaoa_status, result_json),
         )
 
 
@@ -124,13 +154,13 @@ def list_runs(limit: int = 500, full: bool = False) -> list[dict[str, Any]]:
     with _connect() as conn:
         if full:
             rows = conn.execute(
-                "SELECT run_id, goal, backend, score, latency_s, created_at, result_json "
+                "SELECT run_id, goal, backend, score, latency_s, qaoa_status, created_at, result_json "
                 "FROM runs ORDER BY created_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT run_id, goal, backend, score, latency_s, created_at "
+                "SELECT run_id, goal, backend, score, latency_s, qaoa_status, created_at "
                 "FROM runs ORDER BY created_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
@@ -233,7 +263,10 @@ def claim_next_job(batch_id: str) -> dict[str, Any] | None:
     """Atomically claim one pending job for the batch. Returns None if none
     pending. SQLite single-writer semantics make the UPDATE atomic; the
     nested SELECT picks an arbitrary pending job_id which we then mark
-    running and return."""
+    running and return.
+
+    Requires SQLite ≥3.35.0 (RETURNING clause). Checked at init_db().
+    """
     with _connect() as conn:
         cur = conn.execute(
             """

@@ -67,11 +67,4 @@ class CandidateSpace:
             )
             candidates.append(candidate)
 
-        # Verify count
-        expected_count = 2 ** self.num_axes
-        if len(candidates) != expected_count:
-            raise ValueError(
-                f"Generated {len(candidates)} candidates but expected {expected_count}"
-            )
-
         return candidates

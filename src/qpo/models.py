@@ -82,11 +82,14 @@ class ScoredCandidate(BaseModel):
     Attributes:
         candidate: The base Candidate
         pre_score: Score from 7B judge (0-1 or raw)
+        parse_failed: True when the score could not be parsed from the LLM response;
+            score is defaulted to 0.5 and should be treated as unreliable.
         model: Which model produced this score
         latency_ms: Wall-clock scoring time
     """
     candidate: Candidate
     pre_score: float = Field(..., description="Pre-score from judge model")
+    parse_failed: bool = Field(default=False, description="True if score could not be parsed")
     model: str = Field(default="7b", description="Model identifier")
     latency_ms: float = Field(default=0.0)
 
@@ -98,12 +101,15 @@ class EvalResult(BaseModel):
         candidate: The base Candidate
         score: Final evaluation score (0-1 or raw)
         reasoning: Optional explanation of the score
+        parse_failed: True when the score could not be parsed from the LLM response;
+            score is defaulted to 0.5 and should be treated as unreliable.
         model: Which model produced this evaluation
         latency_ms: Wall-clock evaluation time
     """
     candidate: Candidate
     score: float = Field(..., description="Final evaluation score")
     reasoning: str = Field(default="", description="Reasoning for the score")
+    parse_failed: bool = Field(default=False, description="True if score could not be parsed")
     model: str = Field(default="32b", description="Model identifier")
     latency_ms: float = Field(default=0.0)
 
@@ -127,6 +133,10 @@ class PipelineRun(BaseModel):
     decomposed_goal: DecomposedGoal
     candidate_space_size: int = Field(..., description="Total candidates (2^N)")
     quantum_backend: str = Field(default="stub", description="Quantum backend used")
+    provenance: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Run provenance: git_sha, library versions, config_hash",
+    )
     winning_variant: Candidate | None = None
     winning_score: float | None = None
     classical_winner_variant: Candidate | None = None
