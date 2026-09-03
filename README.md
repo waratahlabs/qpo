@@ -2,7 +2,8 @@
 
 Research project exploring QUBO/QAOA formulations for prompt feature selection. The core question: can a quantum algorithm find better prompt feature combinations than classical greedy search at equivalent evaluation cost?
 
-**Results writeup:** [waratahlabs.github.io/2026/05/03/qpo-preliminary-findings/](https://waratahlabs.github.io/2026/05/03/qpo-preliminary-findings/)
+**Results writeup:** [waratahlabs.com/2026/05/26/qpo-preprint/](https://www.waratahlabs.com/2026/05/26/qpo-preprint/)
+**Preprint:** [doi.org/10.5281/zenodo.20394090](https://doi.org/10.5281/zenodo.20394090)
 
 Phase 1 runs entirely on a CUDA-accelerated simulator (PennyLane `lightning.gpu`). Next phases: larger circuits approaching classical simulation limits (~50 qubits), then physical quantum hardware.
 
